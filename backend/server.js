@@ -86,7 +86,7 @@ app.post('/api/ai/analyze', async (req, res) => {
   }
 })
 
-const server = app.listen(PORT, () => {
+const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`Smart classroom Node AI backend listening on port ${PORT}`)
 })
 
