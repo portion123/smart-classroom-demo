@@ -1,61 +1,77 @@
 # GitHub + Zeabur 部署说明
 
-本项目包含两个服务：
+本项目需要在 Zeabur 上部署两个服务：
 
-- `frontend`：Vue/Vite 前端
-- `backend`：Node.js/Express 后端，大模型 API 中转
+- `backend`：Node.js + Express 大模型 API 中转后端
+- `frontend`：Vue/Vite 前端网站
+
+不要把本地 `.env` 或真实 API Key 提交到 GitHub。
 
 ## 1. 推送到 GitHub
 
+仓库地址：
+
 ```bash
-git init
-git add .
-git commit -m "Deploy smart classroom demo"
-git branch -M main
-git remote add origin https://github.com/<your-name>/<your-repo>.git
-git push -u origin main
+https://github.com/portion123/smart-classroom-demo
 ```
 
-提交前确认不要提交本地 `.env`，真实 API Key 只能配置在 Zeabur 环境变量中。
+常规推送流程：
 
-## 2. Zeabur 创建 Backend 服务
+```bash
+git add .
+git commit -m "Configure Zeabur deployment"
+git push
+```
 
-在 Zeabur 中从 GitHub 仓库创建服务：
+提交前确认：
 
+- `.env` 已被 `.gitignore` 忽略
+- `node_modules` 已被忽略
+- `dist` 已被忽略
+- 真实 `LLM_API_KEY` 只配置在本地或 Zeabur 环境变量中
+
+## 2. Zeabur 后端服务
+
+在 Zeabur 从 GitHub 仓库创建后端服务：
+
+- Service name: `smart-classroom-backend`
 - Root Directory: `backend`
-- Build Command: `npm install`
+- Install Command: `npm install`
 - Start Command: `npm run start`
 
-环境变量：
+后端环境变量：
 
 ```env
-LLM_API_KEY=你的真实 API 密钥
-LLM_BASE_URL=你的 API 平台 Base URL
-LLM_MODEL=你的 API 平台支持的模型名
+LLM_API_KEY=你的真实API密钥
+LLM_BASE_URL=你的API平台BaseURL
+LLM_MODEL=你的API平台支持的模型名
 ```
 
-Zeabur 会自动注入 `PORT`，后端代码会使用 `process.env.PORT || 8014`。
+说明：
 
-如果需要限制跨域来源，可以增加：
+- Zeabur 会自动注入 `PORT`
+- 后端代码使用 `process.env.PORT || 8014`
+- 不要在代码或前端环境变量里填写 API Key
+- 如果需要指定允许跨域的前端域名，可以额外配置：
 
 ```env
-CORS_ORIGIN=https://你的前端域名
+CORS_ORIGIN=https://你的前端Zeabur域名
 ```
 
-多个域名用英文逗号分隔。
+## 3. Zeabur 前端服务
 
-## 3. Zeabur 创建 Frontend 服务
+在同一个 GitHub 仓库中再创建一个前端服务：
 
-在同一个 GitHub 仓库中再创建一个服务：
-
+- Service name: `smart-classroom-frontend`
 - Root Directory: `frontend`
-- Build Command: `npm install && npm run build`
-- Start Command: 按 Zeabur 静态站点/前端服务配置发布 `dist`
+- Install Command: `npm install`
+- Build Command: `npm run build`
+- Output Directory: `dist`
 
-环境变量：
+前端环境变量：
 
 ```env
-VITE_API_BASE_URL=https://你的后端-zeabur-域名
+VITE_API_BASE_URL=https://后端Zeabur域名
 ```
 
 示例：
@@ -64,27 +80,35 @@ VITE_API_BASE_URL=https://你的后端-zeabur-域名
 VITE_API_BASE_URL=https://smart-classroom-backend.zeabur.app
 ```
 
-不要在前端配置任何 API Key。
+前端只需要后端 API 地址，不需要也不允许配置大模型 API Key。
 
-## 4. 测试 Backend
+## 4. 测试后端健康检查
 
-健康检查：
+访问：
 
 ```bash
-curl https://你的后端域名/api/ai/health
+curl https://后端Zeabur域名/api/ai/health
 ```
 
-返回中应包含：
+应看到类似结果：
 
-- `hasApiKey`
-- `baseURL`
-- `model`
-- `status: "ok"`
+```json
+{
+  "code": 200,
+  "data": {
+    "port": "Zeabur注入的端口",
+    "hasApiKey": true,
+    "baseURL": true,
+    "model": "你的模型名",
+    "status": "ok"
+  }
+}
+```
 
-AI 分析接口：
+## 5. 测试 AI 分析接口
 
 ```bash
-curl -X POST https://你的后端域名/api/ai/analyze \
+curl -X POST https://后端Zeabur域名/api/ai/analyze \
   -H "Content-Type: application/json" \
   -d '{
     "classroomData": {
@@ -104,9 +128,9 @@ curl -X POST https://你的后端域名/api/ai/analyze \
   }'
 ```
 
-## 5. 判断是否真正接入大模型
+## 6. 判断是否真正接入大模型
 
-- `data.mode = "llm"`：真实大模型结果
-- `data.mode = "mock"`：兜底模拟结果
+- `data.mode = "llm"`：真实大模型返回
+- `data.mode = "mock"`：后端兜底模拟结果
 
-如果返回 `mock`，查看 `data.error`，通常是环境变量缺失、Base URL 不可访问、模型名不支持或上游 API 报错。
+如果返回 `mock`，查看 `data.error`，通常是环境变量缺失、Base URL 不可访问、模型名不匹配或上游 API 报错。

@@ -10,7 +10,7 @@ const __dirname = path.dirname(__filename)
 loadEnvFile(path.join(__dirname, '.env'))
 
 const app = express()
-const PORT = Number(process.env.PORT || 8014)
+const PORT = process.env.PORT || 8014
 const configuredCorsOrigins = (process.env.CORS_ORIGIN || process.env.FRONTEND_ORIGIN || '')
   .split(',')
   .map((origin) => origin.trim())
