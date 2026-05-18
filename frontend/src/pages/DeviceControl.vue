@@ -184,7 +184,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { CircleCheck, Connection, Monitor, Operation, Sunny, SwitchButton, UserFilled, VideoPlay } from '@element-plus/icons-vue'
-import { controlDevice } from '../api/request'
+import { controlDevice, getLatestClassroom } from '../api/request'
 
 const DEVICE_STATE_KEY = 'smart_classroom_device_control_state'
 const actionLoading = ref('')
@@ -269,8 +269,8 @@ const weekEnergy = computed(() => (operationMode.value === 'leave' ? 80.4 : oper
 const todayEnergyNote = computed(() => (operationMode.value === 'energy' ? '预计节能 18%' : operationMode.value === 'leave' ? '节能待机中' : '较昨日 ↓ 8.2%'))
 const weekEnergyNote = computed(() => (operationMode.value === 'energy' ? '较上周 ↓ 10.8%' : operationMode.value === 'leave' ? '待机策略已生效' : '较上周 ↓ 6.7%'))
 
-onMounted(() => {
-  loadDeviceState()
+onMounted(async () => {
+  await loadDeviceStateFromBackend()
 })
 
 async function enableEnergyMode() {
@@ -284,9 +284,11 @@ async function enableEnergyMode() {
     operationMode.value = 'energy'
     persistDeviceState()
     await Promise.allSettled([
-      postDeviceControl('light', 'on'),
-      postDeviceControl('ac', 'on'),
-      postDeviceControl('ventilation', 'on')
+      postDeviceControl('light', 'on', { brightness: 60 }),
+      postDeviceControl('ac', 'on', { temperature: 26, mode: 'cool' }),
+      postDeviceControl('ventilation', 'on', { speed: 'mid' }),
+      postDeviceControl('curtain', 'on', { opening: 50 }),
+      postDeviceControl('media', 'off', { volume: 30 })
     ])
     addLog('全局策略', '启用一键节能模式')
     ElMessage.success('已启用一键节能模式')
@@ -306,9 +308,11 @@ async function enableLeaveMode() {
     operationMode.value = 'leave'
     persistDeviceState()
     await Promise.allSettled([
-      postDeviceControl('light', 'off'),
+      postDeviceControl('light', 'off', { brightness: 0 }),
       postDeviceControl('ac', 'off'),
-      postDeviceControl('ventilation', 'off')
+      postDeviceControl('ventilation', 'off'),
+      postDeviceControl('curtain', 'off', { opening: 0 }),
+      postDeviceControl('media', 'off', { volume: 0 })
     ])
     addLog('全局策略', '启用一键离开模式')
     ElMessage.success('已启用一键离开模式')
@@ -336,6 +340,7 @@ function setLightBrightness(value) {
   markManualMode()
   devices.light.on = value > 0
   persistDeviceState()
+  postDeviceControl('light', value > 0 ? 'on' : 'off', { brightness: value })
   addLog('灯光系统', `调节亮度至 ${value}%`)
   ElMessage.success('灯光亮度已更新')
 }
@@ -344,6 +349,7 @@ function setLightAllOn() {
   markManualMode()
   Object.assign(devices.light, { on: true, brightness: 100, mode: 'manual' })
   persistDeviceState()
+  postDeviceControl('light', 'on', { brightness: 100 })
   addLog('灯光系统', '全开灯光，亮度 100%')
   ElMessage.success('灯光已全开')
 }
@@ -352,6 +358,7 @@ function setLightAllOff() {
   markManualMode()
   Object.assign(devices.light, { on: false, brightness: 0, mode: 'manual' })
   persistDeviceState()
+  postDeviceControl('light', 'off', { brightness: 0 })
   addLog('灯光系统', '全关灯光，亮度 0%')
   ElMessage.success('灯光已全关')
 }
@@ -361,6 +368,7 @@ function setLightAuto() {
   Object.assign(devices.light, { on: true, mode: 'auto' })
   if (devices.light.brightness === 0) devices.light.brightness = 60
   persistDeviceState()
+  postDeviceControl('light', 'on', { brightness: devices.light.brightness })
   addLog('灯光系统', '切换为自动模式')
   ElMessage.success('灯光已切换为自动模式')
 }
@@ -370,6 +378,7 @@ function adjustAcTemperature(delta) {
   devices.ac.on = true
   devices.ac.temperature = Math.min(30, Math.max(18, devices.ac.temperature + delta))
   persistDeviceState()
+  postDeviceControl('ac', 'on', { temperature: devices.ac.temperature, mode: devices.ac.mode })
   addLog('空调系统', `将温度设置为 ${devices.ac.temperature}℃`)
   ElMessage.success('空调温度已更新')
 }
@@ -378,6 +387,7 @@ function setAcMode(value) {
   markManualMode()
   devices.ac.on = true
   persistDeviceState()
+  postDeviceControl('ac', 'on', { temperature: devices.ac.temperature, mode: value })
   addLog('空调系统', `切换模式为 ${acModeMap[value]}`)
   ElMessage.success(`空调已切换为${acModeMap[value]}模式`)
 }
@@ -386,6 +396,7 @@ function setVentilationSpeed(value) {
   markManualMode()
   devices.ventilation.on = true
   persistDeviceState()
+  postDeviceControl('ventilation', 'on', { speed: value, mode: devices.ventilation.mode })
   addLog('新风系统', `切换风速为 ${speedMap[value]}`)
   ElMessage.success(`新风风速已切换为${speedMap[value]}`)
 }
@@ -394,6 +405,7 @@ function setVentilationMode(value) {
   markManualMode()
   devices.ventilation.on = true
   persistDeviceState()
+  postDeviceControl('ventilation', 'on', { speed: devices.ventilation.speed, mode: value })
   addLog('新风系统', `切换模式为 ${ventModeMap[value]}`)
   ElMessage.success(`新风已切换为${ventModeMap[value]}模式`)
 }
@@ -403,11 +415,12 @@ function syncCurtainFromOpening(value) {
   persistDeviceState()
 }
 
-function toggleCurtain(value) {
+async function toggleCurtain(value) {
   markManualMode()
   if (!value) devices.curtain.opening = 0
   if (value && devices.curtain.opening === 0) devices.curtain.opening = 50
   persistDeviceState()
+  await postDeviceControl('curtain', value ? 'on' : 'off', { opening: devices.curtain.opening })
   addLog('窗帘系统', value ? `打开窗帘至 ${devices.curtain.opening}%` : '关闭窗帘')
   ElMessage.success('窗帘状态已更新')
 }
@@ -416,6 +429,7 @@ function setCurtainOpening(value) {
   markManualMode()
   devices.curtain.on = value > 0
   persistDeviceState()
+  postDeviceControl('curtain', value > 0 ? 'on' : 'off', { opening: value })
   addLog('窗帘系统', `调整开合程度至 ${value}%`)
   ElMessage.success('窗帘开合度已更新')
 }
@@ -424,6 +438,7 @@ function openCurtain() {
   markManualMode()
   Object.assign(devices.curtain, { on: true, opening: 100 })
   persistDeviceState()
+  postDeviceControl('curtain', 'on', { opening: 100 })
   addLog('窗帘系统', '打开窗帘至 100%')
   ElMessage.success('窗帘已打开')
 }
@@ -432,6 +447,7 @@ function closeCurtain() {
   markManualMode()
   Object.assign(devices.curtain, { on: false, opening: 0 })
   persistDeviceState()
+  postDeviceControl('curtain', 'off', { opening: 0 })
   addLog('窗帘系统', '关闭窗帘至 0%')
   ElMessage.success('窗帘已关闭')
 }
@@ -440,14 +456,16 @@ function stopCurtain() {
   markManualMode()
   devices.curtain.on = false
   persistDeviceState()
+  postDeviceControl('curtain', 'off', { opening: devices.curtain.opening })
   addLog('窗帘系统', `停止窗帘移动，保持 ${devices.curtain.opening}%`)
   ElMessage.success('窗帘已停止')
 }
 
-function toggleMedia(value) {
+async function toggleMedia(value) {
   markManualMode()
   if (value && devices.media.volume === 0) devices.media.volume = 30
   persistDeviceState()
+  await postDeviceControl('media', value ? 'on' : 'off', { volume: devices.media.volume, source: devices.media.source })
   addLog('多媒体设备', value ? `开启多媒体设备，信号源：${sourceLabel.value}` : '关闭多媒体设备')
   ElMessage.success('多媒体状态已更新')
 }
@@ -456,6 +474,7 @@ function setMediaSource(value) {
   markManualMode()
   devices.media.on = true
   persistDeviceState()
+  postDeviceControl('media', 'on', { source: value, volume: devices.media.volume })
   addLog('多媒体设备', `切换信号源至 ${sourceMap[value]}`)
   ElMessage.success(`信号源已切换为${sourceMap[value]}`)
 }
@@ -463,6 +482,7 @@ function setMediaSource(value) {
 function setMediaVolume(value) {
   markManualMode()
   persistDeviceState()
+  postDeviceControl('media', value > 0 ? 'on' : 'off', { volume: value, source: devices.media.source })
   addLog('多媒体设备', `音量调节至 ${value}%`)
   ElMessage.success('多媒体音量已更新')
 }
@@ -488,12 +508,57 @@ function markManualMode() {
   }
 }
 
-async function postDeviceControl(device, action) {
-  if (!['light', 'ac', 'ventilation'].includes(device)) return { mode: 'mock' }
+async function postDeviceControl(device, action, extra = {}) {
   try {
-    return await controlDevice({ classroom_id: 'A205', device, action })
+    const result = await controlDevice({ classroom_id: 'A205', device, action, ...extra })
+    if (result?.latest) applyBackendState(result.latest)
+    return result
   } catch (error) {
     return { mode: 'mock', device, action }
+  }
+}
+
+async function loadDeviceStateFromBackend() {
+  try {
+    applyBackendState(await getLatestClassroom())
+  } catch (error) {
+    ElMessage.warning('后端设备状态暂不可用，页面保留当前演示状态')
+  }
+}
+
+function applyBackendState(latest) {
+  if (!latest?.devices) return
+  const backendDevices = latest.devices
+  if (backendDevices.light) {
+    Object.assign(devices.light, {
+      on: Boolean(backendDevices.light.on && backendDevices.light.online),
+      brightness: Math.round(backendDevices.light.brightness ?? devices.light.brightness)
+    })
+  }
+  if (backendDevices.airConditioner) {
+    Object.assign(devices.ac, {
+      on: Boolean(backendDevices.airConditioner.on && backendDevices.airConditioner.online),
+      temperature: Math.round(backendDevices.airConditioner.targetTemperature ?? devices.ac.temperature),
+      mode: backendDevices.airConditioner.mode || devices.ac.mode
+    })
+  }
+  if (backendDevices.freshAir) {
+    Object.assign(devices.ventilation, {
+      on: Boolean(backendDevices.freshAir.on && backendDevices.freshAir.online),
+      speed: backendDevices.freshAir.speed || devices.ventilation.speed
+    })
+  }
+  if (backendDevices.curtain) {
+    Object.assign(devices.curtain, {
+      on: Boolean(backendDevices.curtain.on && backendDevices.curtain.online),
+      opening: Math.round(backendDevices.curtain.opening ?? devices.curtain.opening)
+    })
+  }
+  if (backendDevices.multimedia) {
+    Object.assign(devices.media, {
+      on: Boolean(backendDevices.multimedia.on && backendDevices.multimedia.online),
+      volume: Math.round(backendDevices.multimedia.volume ?? devices.media.volume)
+    })
   }
 }
 
@@ -528,16 +593,7 @@ function loadDeviceState() {
 }
 
 function persistDeviceState() {
-  if (typeof window === 'undefined') return
-  window.localStorage.setItem(
-    DEVICE_STATE_KEY,
-    JSON.stringify({
-      devices: JSON.parse(JSON.stringify(devices)),
-      strategies: strategies.map((item) => ({ title: item.title, enabled: item.enabled })),
-      operationMode: operationMode.value,
-      logs: logs.value
-    })
-  )
+  // 设备主状态由后端动态模拟器维护，前端不再把它作为 localStorage 主数据源。
 }
 
 function readDeviceState() {

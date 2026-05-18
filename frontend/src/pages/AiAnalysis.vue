@@ -155,9 +155,10 @@ import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { CircleCheck, Connection, MagicStick, Monitor, View, Warning } from '@element-plus/icons-vue'
 import ChartPanel from '../components/ChartPanel.vue'
-import { analyzeAi, getLatestClassroom, getMockHistory } from '../api/request'
+import { analyzeAi, getHistoryData, getLatestClassroom } from '../api/request'
 
 const latest = ref({ temperature: 26.1, humidity: 62, co2: 980, pm25: 28, noise: 45, people_count: 36, update_time: '2025-05-23 10:24:36' })
+const history = ref([])
 const analysis = ref('')
 const aiResult = ref(null)
 const aiMode = ref('')
@@ -192,9 +193,11 @@ const currentClassroomPayload = computed(() => ({
     temperature: latest.value.temperature ?? 28.6,
     humidity: latest.value.humidity ?? 68,
     co2: latest.value.co2 ?? 1450,
+    light: latest.value.light ?? 720,
     pm25: latest.value.pm25 ?? 42,
     noise: latest.value.noise ?? 56,
     people_count: latest.value.people_count ?? 48,
+    energy: latest.value.energy ?? 12.8,
     light_status: latest.value.light_status || 'on',
     ac_status: latest.value.ac_status || 'on',
     ventilation_status: latest.value.ventilation_status || 'off',
@@ -234,16 +237,16 @@ const previewRows = [
 ]
 
 const basis = [
-  { title: '实时环境数据', text: '来自传感器的实时监测数据' },
-  { title: '历史趋势数据', text: '近7天同时间段环境变化趋势' },
-  { title: '设备运行状态', text: '空调、新风、照明等设备状态' },
+  { title: '实时环境数据', text: '来自后端动态模拟器的实时课堂状态' },
+  { title: '历史趋势数据', text: '最近一段时间的温湿度、CO₂、光照、人数与能耗曲线' },
+  { title: '设备运行状态', text: '空调、新风、照明、窗帘、多媒体等设备状态' },
   { title: '教室使用情况', text: '当前人数、课程安排与使用时长' },
   { title: '节能模型', text: 'AI节能模型与多维度算法分析' }
 ]
 
 const forecastOption = computed(() => {
-  const history = getMockHistory(18)
-  const x = history.map((item, index) => `10:${String(25 + index * 2).padStart(2, '0')}`)
+  const points = history.value.slice(-18)
+  const x = points.map((item) => item.time)
   return {
     color: ['#31e98f', '#ff4d5f', '#147cff'],
     tooltip: { trigger: 'axis', backgroundColor: 'rgba(4,18,42,.92)', borderColor: '#1a9cff', textStyle: { color: '#eaf6ff' } },
@@ -255,9 +258,9 @@ const forecastOption = computed(() => {
       { type: 'value', axisLabel: { color: '#9fc2df' }, splitLine: { show: false } }
     ],
     series: [
-      { name: '温度(℃)', type: 'line', smooth: true, data: history.map((item) => item.temperature), lineStyle: { width: 3 } },
-      { name: 'CO₂(ppm)', type: 'line', smooth: true, yAxisIndex: 1, data: history.map((item) => item.co2), lineStyle: { width: 3 } },
-      { name: '人数(人)', type: 'line', smooth: true, data: history.map((item) => item.people_count), lineStyle: { width: 3 } }
+      { name: '温度(℃)', type: 'line', smooth: true, data: points.map((item) => item.temperature), lineStyle: { width: 3 } },
+      { name: 'CO₂(ppm)', type: 'line', smooth: true, yAxisIndex: 1, data: points.map((item) => item.co2), lineStyle: { width: 3 } },
+      { name: '人数(人)', type: 'line', smooth: true, data: points.map((item) => item.people_count), lineStyle: { width: 3 } }
     ]
   }
 })
@@ -377,7 +380,9 @@ function formatStructuredAnalysis(result) {
 }
 
 onMounted(async () => {
-  latest.value = await getLatestClassroom()
+  const [latestData, historyData] = await Promise.all([getLatestClassroom(), getHistoryData()])
+  latest.value = latestData
+  history.value = historyData
   await generate()
 })
 </script>

@@ -79,9 +79,9 @@
             <div class="side-room-photo"></div>
             <div class="room-kv"><span>设备运行</span><b>正常</b></div>
             <div class="room-kv"><span>整体舒适度</span><b>舒适</b></div>
-            <div class="room-kv"><span>温度</span><b>26.6℃</b></div>
-            <div class="room-kv"><span>CO₂浓度</span><b>980 ppm</b></div>
-            <div class="room-kv"><span>PM2.5</span><b>28 μg/m³</b></div>
+            <div class="room-kv"><span>温度</span><b>{{ latest.temperature }}℃</b></div>
+            <div class="room-kv"><span>CO₂浓度</span><b>{{ latest.co2 }} ppm</b></div>
+            <div class="room-kv"><span>能耗</span><b>{{ latest.energy }} kWh</b></div>
           </div>
         </section>
 
@@ -115,11 +115,12 @@ import { computed, inject, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Bell, Download, Monitor, Operation, Timer, WarningFilled } from '@element-plus/icons-vue'
 import ChartPanel from '../components/ChartPanel.vue'
-import { getAlarmList } from '../api/request'
+import { getAlarmList, getLatestClassroom } from '../api/request'
 
 const ALERT_RECORDS_KEY = 'smart_classroom_alert_records'
 
 const alarms = ref([])
+const latest = ref({ temperature: '--', co2: '--', energy: '--' })
 const alarmTableRef = ref(null)
 const filters = reactive({ type: 'all', status: 'all', date: '' })
 const appNavigation = inject('appNavigation', null)
@@ -144,6 +145,14 @@ const filteredAlarms = computed(() =>
     return typeMatched && statusMatched
   })
 )
+const alarmTypeData = computed(() => {
+  const counts = alarms.value.reduce((result, item) => {
+    result[item.type] = (result[item.type] || 0) + 1
+    return result
+  }, {})
+  const data = Object.entries(counts).map(([name, value]) => ({ name, value }))
+  return data.length ? data : [{ value: 1, name: '暂无报警' }]
+})
 
 const typeOption = computed(() => ({
   color: ['#ff4d5f', '#ff7a2f', '#ffd34d', '#20d8ff', '#675cff'],
@@ -155,16 +164,10 @@ const typeOption = computed(() => ({
       radius: ['48%', '72%'],
       center: ['36%', '52%'],
       label: { color: '#eaf6ff', formatter: '{b}\n{d}%' },
-      data: [
-        { value: 8, name: 'CO₂超标' },
-        { value: 7, name: '温度偏高' },
-        { value: 5, name: '湿度偏高' },
-        { value: 4, name: 'PM2.5超标' },
-        { value: 4, name: '噪声超标' }
-      ]
+      data: alarmTypeData.value
     }
   ],
-  graphic: [{ type: 'text', left: '31%', top: '47%', style: { text: '28\n总数', fill: '#fff', fontSize: 24, fontWeight: 800, align: 'center' } }]
+  graphic: [{ type: 'text', left: '31%', top: '47%', style: { text: `${totalCount.value}\n总数`, fill: '#fff', fontSize: 24, fontWeight: 800, align: 'center' } }]
 }))
 
 const trendOption = computed(() => ({
@@ -203,7 +206,7 @@ async function confirmProcessAlarm(row) {
 
 function processAlarm(row) {
   row.status = '已处理'
-  persistAlarms()
+  notifyAlertCount()
   ElMessage.success('报警已标记为已处理')
 }
 
@@ -262,13 +265,10 @@ function quickView(page) {
 }
 
 onMounted(async () => {
-  const saved = loadAlarms()
-  if (saved?.length) {
-    alarms.value = saved
-  } else {
-    alarms.value = (await getAlarmList()).map(normalizeAlarm)
-    persistAlarms()
-  }
+  const [latestData, alarmData] = await Promise.all([getLatestClassroom(), getAlarmList()])
+  latest.value = latestData
+  alarms.value = alarmData.map(normalizeAlarm)
+  notifyAlertCount()
 })
 
 function normalizeAlarm(item, index) {
@@ -287,20 +287,6 @@ function alarmAdvice(row) {
   if (row.type?.includes('人数')) return '建议关注空间容量和通风负荷。'
   if (row.type?.includes('噪声')) return '建议提醒课堂保持安静。'
   return '建议运维人员复核现场状态并记录处理结果。'
-}
-
-function loadAlarms() {
-  try {
-    const raw = window.localStorage.getItem(ALERT_RECORDS_KEY)
-    return raw ? JSON.parse(raw) : null
-  } catch (error) {
-    return null
-  }
-}
-
-function persistAlarms() {
-  window.localStorage.setItem(ALERT_RECORDS_KEY, JSON.stringify(alarms.value))
-  notifyAlertCount()
 }
 
 function notifyAlertCount() {

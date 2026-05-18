@@ -173,7 +173,7 @@ const quickDevices = computed(() => [
   { key: 'ventilation', name: '新风', icon: Connection, on: latest.value.ventilation_status === 'on', desc: '中速通风' }
 ])
 
-const aiModeText = computed(() => (aiMode.value === 'deepseek' ? 'DeepSeek 实时分析' : 'Mock 分析模式'))
+const aiModeText = computed(() => (['llm', 'deepseek'].includes(aiMode.value) ? 'DeepSeek 实时分析' : '后端本地 AI 模拟分析'))
 const aiSummary = computed(() => aiText.value.replace(/\n+/g, ' ').slice(0, 170))
 
 const temperatureOption = computed(() => makeLineOption('温度', history.value.map((item) => item.time), history.value.map((item) => item.temperature), '#31e98f', '℃'))

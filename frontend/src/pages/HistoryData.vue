@@ -28,7 +28,7 @@
           <ChartPanel title="PM2.5历史曲线（μg/m³）" :option="pm25Option" height="190px" />
           <ChartPanel title="噪声历史曲线（dB）" :option="noiseOption" height="190px" />
           <ChartPanel title="人数历史曲线（人）" :option="peopleOption" height="190px" />
-          <ChartPanel title="周能耗对比（kWh）" :option="energyOption" height="190px" />
+          <ChartPanel title="能耗历史曲线（kWh）" :option="energyOption" height="190px" />
           <ChartPanel class="wide-chart" title="教室使用强度热力图（小时分布）" :option="heatmapOption" height="190px" />
         </section>
 
@@ -45,9 +45,11 @@
               <el-table-column prop="temperature" label="温度(℃)" />
               <el-table-column prop="humidity" label="湿度(%)" />
               <el-table-column prop="co2" label="CO₂(ppm)" />
+              <el-table-column prop="light" label="光照(lux)" />
               <el-table-column prop="pm25" label="PM2.5(μg/m³)" />
               <el-table-column prop="noise" label="噪声(dB)" />
               <el-table-column prop="people_count" label="人数(人)" />
+              <el-table-column prop="energy" label="能耗(kWh)" />
               <el-table-column label="状态">
                 <template #default>
                   <el-tag type="success" effect="dark" round>正常</el-tag>
@@ -158,14 +160,7 @@ const co2Option = computed(() => singleLine('CO₂', 'co2', '#ff4d5f', 'ppm'))
 const pm25Option = computed(() => singleLine('PM2.5', 'pm25', '#ffbf2f', 'μg/m³'))
 const noiseOption = computed(() => singleLine('噪声', 'noise', '#20d8ff', 'dB'))
 const peopleOption = computed(() => singleLine('人数', 'people_count', '#925cff', '人'))
-const energyOption = computed(() => ({
-  ...baseOption(['周一', '周二', '周三', '周四', '周五', '周六', '周日']),
-  legend: { top: 0, textStyle: { color: '#a9c9e8' } },
-  series: [
-    { name: '本周', type: 'bar', data: [78, 96, 112, 99, 106, 68, 82], itemStyle: { color: '#147cff' } },
-    { name: '上周', type: 'bar', data: [70, 101, 92, 95, 83, 62, 57], itemStyle: { color: 'rgba(170,205,255,.36)' } }
-  ]
-}))
+const energyOption = computed(() => singleLine('能耗', 'energy', '#20d8ff', 'kWh'))
 const heatmapOption = computed(() => heatmap())
 const labels = computed(() => history.value.map((item) => item.date || item.time).slice(-28))
 

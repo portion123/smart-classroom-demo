@@ -1,6 +1,7 @@
 import axios from 'axios'
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8014'
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || (import.meta.env.DEV ? 'http://127.0.0.1:8014' : '')
+const ENABLE_MOCK = String(import.meta.env.VITE_ENABLE_MOCK || '').toLowerCase() === 'true'
 const AI_ANALYZE_URL = `${API_BASE_URL}/api/ai/analyze`
 
 const request = axios.create({
@@ -46,9 +47,12 @@ function latestMock() {
     temperature,
     humidity: Number((62 + Math.sin(tick / 30) * 6).toFixed(1)),
     co2,
+    light: Math.round(deviceState.light ? 720 + Math.sin(tick / 20) * 80 : 120 + Math.sin(tick / 20) * 30),
     pm25: Math.round(34 + Math.sin(tick / 26) * 8),
     noise: Math.round(52 + Math.sin(tick / 15) * 9),
     people_count: Math.round(42 + Math.sin(tick / 22) * 8),
+    peopleCount: Math.round(42 + Math.sin(tick / 22) * 8),
+    energy: Number((12.4 + Math.sin(tick / 28) * 1.2 + (deviceState.ac ? 2.2 : 0.3) + (deviceState.ventilation ? 1.1 : 0.2)).toFixed(1)),
     light_status: deviceState.light ? 'on' : 'off',
     ac_status: deviceState.ac ? 'on' : 'off',
     ventilation_status: deviceState.ventilation ? 'on' : 'off',
@@ -79,9 +83,12 @@ function historyMock(length = 48) {
       temperature: Number((24.8 + wave * 2.1 + (active ? 1.2 : 0)).toFixed(1)),
       humidity: Number((58 + Math.cos(index / 6) * 8).toFixed(1)),
       co2: Math.round(820 + (active ? 420 : 120) + Math.sin(index / 4) * 180),
+      light: Math.round(680 + Math.sin(index / 6) * 120 + (active ? 80 : -220)),
       pm25: Math.round(34 + Math.sin(index / 5) * 18 + (active ? 5 : 0)),
       noise: Math.round(46 + Math.sin(index / 7) * 10 + (active ? 6 : 0)),
-      people_count: Math.max(8, Math.round((active ? 38 : 10) + Math.sin(index / 4) * 18))
+      people_count: Math.max(8, Math.round((active ? 38 : 10) + Math.sin(index / 4) * 18)),
+      peopleCount: Math.max(8, Math.round((active ? 38 : 10) + Math.sin(index / 4) * 18)),
+      energy: Number((8.6 + (active ? 4.2 : 1.2) + Math.sin(index / 5) * 1.4).toFixed(1))
     })
   }
   return result
@@ -141,7 +148,8 @@ async function apiGet(path, fallback) {
     if (response.data?.code === 200) return response.data.data
     throw new Error(response.data?.message || '接口返回异常')
   } catch (error) {
-    return fallback()
+    if (ENABLE_MOCK) return fallback()
+    throw error
   }
 }
 
@@ -151,7 +159,8 @@ async function apiPost(path, body, fallback) {
     if (response.data?.code === 200) return response.data.data
     throw new Error(response.data?.message || '接口返回异常')
   } catch (error) {
-    return fallback(body)
+    if (ENABLE_MOCK) return fallback(body)
+    throw error
   }
 }
 
@@ -173,6 +182,7 @@ export async function analyzeAi(payload = { classroom_id: 'A205' }) {
     if (response.data?.code === 200) return response.data.data
     throw new Error(response.data?.message || 'AI 分析接口返回异常')
   } catch (error) {
+    if (!ENABLE_MOCK) throw error
     const fallback = aiMock(payload)
     fallback.errorMessage = error?.message || 'AI 分析接口不可用'
     return fallback
@@ -181,8 +191,10 @@ export async function analyzeAi(payload = { classroom_id: 'A205' }) {
 
 export function controlDevice(payload) {
   return apiPost('/api/device/control', payload, (body) => {
-    if (body?.device && ['light', 'ac', 'ventilation'].includes(body.device)) {
-      deviceState[body.device] = body.action === 'on'
+    const deviceMap = { ac: 'ac', airConditioner: 'ac', ventilation: 'ventilation', freshAir: 'ventilation', light: 'light' }
+    const key = deviceMap[body?.device]
+    if (key) {
+      deviceState[key] = body.action === 'on'
     }
     return {
       classroom_id: body?.classroom_id || 'A205',

@@ -3,6 +3,13 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import express from 'express'
 import OpenAI from 'openai'
+import {
+  buildAnalysisContext,
+  controlDevice,
+  getAlarmList,
+  getHistoryData,
+  getLatestClassroom
+} from './simulator.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -44,28 +51,61 @@ app.get('/api/ai/health', (req, res) => {
     message: 'success',
     data: {
       port: PORT,
-      hasApiKey: Boolean(process.env.LLM_API_KEY),
-      baseURL: Boolean(process.env.LLM_BASE_URL),
-      model: process.env.LLM_MODEL || '',
+      hasApiKey: Boolean(resolveLlmConfig().apiKey),
+      baseURL: Boolean(resolveLlmConfig().baseURL),
+      model: resolveLlmConfig().model,
       status: 'ok'
     }
   })
 })
 
-app.post('/api/ai/analyze', async (req, res) => {
-  const classroom = normalizeClassroomPayload(req.body)
-  const missingEnv = requiredLlmEnv().filter((key) => !process.env[key])
+app.get('/api/classroom/latest', (req, res) => {
+  sendJson(res, {
+    code: 200,
+    message: 'success',
+    data: getLatestClassroom()
+  })
+})
 
-  if (missingEnv.length > 0) {
+app.get('/api/classroom/history', (req, res) => {
+  sendJson(res, {
+    code: 200,
+    message: 'success',
+    data: getHistoryData(req.query.limit)
+  })
+})
+
+app.get('/api/alarm/list', (req, res) => {
+  sendJson(res, {
+    code: 200,
+    message: 'success',
+    data: getAlarmList()
+  })
+})
+
+app.post('/api/device/control', (req, res) => {
+  sendJson(res, {
+    code: 200,
+    message: 'success',
+    data: controlDevice(req.body)
+  })
+})
+
+app.post('/api/ai/analyze', async (req, res) => {
+  const context = buildAnalysisContext()
+  const classroom = normalizeClassroomPayload(req.body?.classroomData || req.body?.classroomState ? req.body : context.classroomState)
+  const config = resolveLlmConfig()
+
+  if (!config.apiKey) {
     return sendJson(res, {
       code: 200,
       message: 'success',
-      data: buildMockData(classroom, `缺少环境变量：${missingEnv.join(', ')}`)
+      data: buildMockData(classroom, context, '缺少 DeepSeek API Key，已启用本地 AI 模拟分析')
     })
   }
 
   try {
-    const { analysis, usage } = await callLlmAnalysis(classroom)
+    const { analysis, usage } = await callLlmAnalysis(classroom, context, config)
     return sendJson(res, {
       code: 200,
       message: 'success',
@@ -74,14 +114,15 @@ app.post('/api/ai/analyze', async (req, res) => {
         classroom_id: classroom.classroom_id,
         analysis: formatAnalysisText(analysis),
         result: analysis,
-        usage
+        usage,
+        update_time: context.classroomState.update_time
       }
     })
   } catch (error) {
     return sendJson(res, {
       code: 200,
       message: 'success',
-      data: buildMockData(classroom, readableError(error))
+      data: buildMockData(classroom, context, readableError(error))
     })
   }
 })
@@ -103,8 +144,12 @@ function sendJson(res, payload, status = 200) {
   return res.status(status).set('Content-Type', 'application/json; charset=utf-8').send(JSON.stringify(payload))
 }
 
-function requiredLlmEnv() {
-  return ['LLM_API_KEY', 'LLM_BASE_URL', 'LLM_MODEL']
+function resolveLlmConfig() {
+  return {
+    apiKey: process.env.LLM_API_KEY || process.env.DEEPSEEK_API_KEY || '',
+    baseURL: process.env.LLM_BASE_URL || process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com',
+    model: process.env.LLM_MODEL || process.env.DEEPSEEK_MODEL || 'deepseek-chat'
+  }
 }
 
 function isAllowedOrigin(origin) {
@@ -165,15 +210,15 @@ function numberOrDefault(value, fallback) {
   return Number.isFinite(number) ? number : fallback
 }
 
-async function callLlmAnalysis(classroom) {
+async function callLlmAnalysis(classroom, context, config) {
   const client = new OpenAI({
-    apiKey: process.env.LLM_API_KEY,
-    baseURL: process.env.LLM_BASE_URL,
+    apiKey: config.apiKey,
+    baseURL: config.baseURL,
     timeout: Number(process.env.LLM_TIMEOUT_MS || 30000)
   })
 
   const response = await client.chat.completions.create({
-    model: process.env.LLM_MODEL,
+    model: config.model,
     temperature: 0.2,
     max_tokens: 900,
     messages: [
@@ -183,7 +228,7 @@ async function callLlmAnalysis(classroom) {
       },
       {
         role: 'user',
-        content: buildPrompt(classroom)
+        content: buildPrompt(classroom, context)
       }
     ]
   })
@@ -197,7 +242,23 @@ async function callLlmAnalysis(classroom) {
   }
 }
 
-function buildPrompt(classroom) {
+function buildPrompt(classroom, context) {
+  const history = context.history.slice(-12).map((item) => ({
+    time: item.time,
+    temperature: item.temperature,
+    humidity: item.humidity,
+    co2: item.co2,
+    light: item.light,
+    peopleCount: item.peopleCount,
+    energy: item.energy
+  }))
+  const alarms = context.alarms.map((item) => ({
+    type: item.type,
+    level: item.level,
+    content: item.content,
+    status: item.status
+  }))
+
   return `请根据 ${classroom.classroom_id} 智慧教室实时数据生成环境分析与节能调控方案。
 
 当前数据：
@@ -208,18 +269,22 @@ function buildPrompt(classroom) {
 - PM2.5：${classroom.pm25} μg/m³
 - 噪声：${classroom.noise} dB
 - 人数：${classroom.people_count}
+- 光照：${classroom.light || context.classroomState.light} lux
+- 能耗：${classroom.energy || context.classroomState.energy} kWh
 - 灯光状态：${classroom.light_status}
 - 空调状态：${classroom.ac_status}
 - 新风状态：${classroom.ventilation_status}
 - 窗帘状态：${classroom.curtain_status}
 - 多媒体状态：${classroom.multimedia_status}
+- 最近历史曲线：${JSON.stringify(history)}
+- 当前报警：${JSON.stringify(alarms)}
 
 输出 JSON 结构必须为：
 {
   "summary": "总体分析，1-2 句话",
   "riskLevel": "低/中/高",
   "problems": ["问题1", "问题2"],
-  "suggestions": ["建议1", "建议2"],
+  "suggestions": ["节能建议1", "设备调度建议2"],
   "deviceActions": [
     { "device": "空调", "action": "设为 26℃", "reason": "原因" },
     { "device": "新风", "action": "开启中速", "reason": "原因" }
@@ -259,25 +324,32 @@ function arrayOfText(value) {
   return Array.isArray(value) ? value.map((item) => String(item)).filter(Boolean) : []
 }
 
-function buildMockData(classroom, reason) {
+function buildMockData(classroom, context, reason) {
+  const latest = context.classroomState
+  const alarmText = context.alarms.length
+    ? context.alarms.slice(0, 3).map((item) => item.type).join('、')
+    : '暂无严重报警'
+  const freshAirSuggestion = latest.co2 > 1000 ? '新风开启中速或高速运行，优先把 CO2 降到 900 ppm 以下' : '新风保持低速巡航，避免过度通风造成能耗浪费'
+  const acSuggestion = latest.temperature > 28 ? '空调设为 26℃ 制冷，温度稳定后切换节能模式' : '空调维持当前设定，避免频繁启停'
+  const lightSuggestion = latest.light > 850 ? '灯光亮度下调到 70%-80%，配合窗帘利用自然光' : '灯光保持当前亮度，优先保证课堂照度'
   const analysis = normalizeLlmResult({
-    summary: `${classroom.classroom_id} 当前 CO2 与温度偏高，建议执行舒适节能平衡策略。`,
-    riskLevel: '中',
+    summary: `${classroom.classroom_id} 当前环境由动态模拟器生成，温度 ${latest.temperature}℃、CO2 ${latest.co2} ppm、能耗 ${latest.energy} kWh，主要风险为 ${alarmText}。`,
+    riskLevel: latest.status === 'danger' ? '高' : latest.status === 'warning' ? '中' : '低',
     problems: [
-      `CO2 当前为 ${classroom.co2} ppm，存在空气流通不足风险`,
-      `温度为 ${classroom.temperature}℃，舒适度可能下降`,
-      '灯光、新风与空调存在联动优化空间'
+      latest.co2 > 1000 ? `CO2 当前为 ${latest.co2} ppm，人数与通风状态导致空气质量压力上升` : 'CO2 处于可接受范围',
+      latest.temperature > 30 ? `温度达到 ${latest.temperature}℃，已触发温度异常` : `温度 ${latest.temperature}℃，舒适度整体可控`,
+      latest.energy > 16 ? `能耗 ${latest.energy} kWh 偏高，照明、空调和多媒体存在联动优化空间` : '能耗暂未超过阈值'
     ],
     suggestions: [
-      '空调设为 26℃',
-      '新风开启中速运行',
-      '灯光亮度调整为 80%',
-      '预计节能 18%'
+      freshAirSuggestion,
+      acSuggestion,
+      lightSuggestion,
+      '人数上升时优先通风，人数下降后自动降档，预计节能 10%-18%'
     ],
     deviceActions: [
-      { device: '空调', action: '设为 26℃', reason: '降低温度并维持舒适区间' },
-      { device: '新风', action: '开启中速', reason: '降低 CO2 浓度' },
-      { device: '灯光', action: '亮度调整为 80%', reason: '减少照明能耗' }
+      { device: '空调', action: latest.temperature > 28 ? '设为 26℃' : '保持当前策略', reason: '根据温度趋势控制舒适度与能耗' },
+      { device: '新风', action: latest.co2 > 1000 ? '开启中速' : '低速巡航', reason: '根据 CO2 和人数变化调节空气质量' },
+      { device: '灯光', action: latest.light > 850 ? '亮度调整为 75%' : '保持当前亮度', reason: '兼顾照度与节能' }
     ]
   })
 
@@ -288,7 +360,8 @@ function buildMockData(classroom, reason) {
     classroom_id: classroom.classroom_id,
     analysis: formatAnalysisText(analysis),
     result: analysis,
-    usage: null
+    usage: null,
+    update_time: latest.update_time
   }
 }
 
