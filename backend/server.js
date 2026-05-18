@@ -8,7 +8,8 @@ import {
   controlDevice,
   getAlarmList,
   getHistoryData,
-  getLatestClassroom
+  getLatestClassroom,
+  getSimulationTime
 } from './simulator.js'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -93,6 +94,8 @@ app.post('/api/device/control', (req, res) => {
 
 app.post('/api/ai/analyze', async (req, res) => {
   const context = buildAnalysisContext()
+  const simulationTime = getSimulationTime()
+  const analysisTime = context.classroomState?.updatedAt || context.classroomState?.update_time || simulationTime.updatedAt
   const classroom = normalizeClassroomPayload(req.body?.classroomData || req.body?.classroomState ? req.body : context.classroomState)
   const config = resolveLlmConfig()
 
@@ -115,7 +118,9 @@ app.post('/api/ai/analyze', async (req, res) => {
         analysis: formatAnalysisText(analysis),
         result: analysis,
         usage,
-        update_time: context.classroomState.update_time
+        analysisTime,
+        updatedAt: analysisTime,
+        update_time: analysisTime
       }
     })
   } catch (error) {
@@ -324,7 +329,7 @@ function arrayOfText(value) {
   return Array.isArray(value) ? value.map((item) => String(item)).filter(Boolean) : []
 }
 
-function buildMockData(classroom, context, reason) {
+function buildMockData(classroom, context, reason, analysisTime = '') {
   const latest = context.classroomState
   const alarmText = context.alarms.length
     ? context.alarms.slice(0, 3).map((item) => item.type).join('、')
@@ -353,17 +358,21 @@ function buildMockData(classroom, context, reason) {
     ]
   })
 
-  return {
-    mode: 'mock',
-    fallback: true,
-    error: reason,
-    classroom_id: classroom.classroom_id,
-    analysis: formatAnalysisText(analysis),
-    result: analysis,
-    usage: null,
-    update_time: latest.update_time
+    const resolvedTime = analysisTime || latest.updatedAt || latest.update_time || latest.currentTime
+
+    return {
+      mode: 'mock',
+      fallback: true,
+      error: reason,
+      classroom_id: classroom.classroom_id,
+      analysis: formatAnalysisText(analysis),
+      result: analysis,
+      usage: null,
+      analysisTime: resolvedTime,
+      updatedAt: resolvedTime,
+      update_time: resolvedTime
+    }
   }
-}
 
 function formatAnalysisText(result) {
   return [

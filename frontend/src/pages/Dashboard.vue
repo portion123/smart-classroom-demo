@@ -221,10 +221,30 @@ async function loadDashboard() {
 
 async function generateAnalysis() {
   aiLoading.value = true
-  const result = await analyzeAi({ classroom_id: 'A205' })
-  aiText.value = result.analysis
-  aiMode.value = result.mode
-  aiLoading.value = false
+  try {
+    const result = await analyzeAi({ classroom_id: 'A205' })
+    aiText.value = result.analysis
+    aiMode.value = result.mode
+
+    const analysisTime =
+      result.analysisTime ||
+      result.updatedAt ||
+      result.update_time ||
+      latest.value.updatedAt ||
+      latest.value.update_time
+
+    if (analysisTime) {
+      latest.value = {
+        ...latest.value,
+        updatedAt: analysisTime,
+        update_time: analysisTime,
+        currentTime: analysisTime,
+        generatedAt: analysisTime
+      }
+    }
+  } finally {
+    aiLoading.value = false
+  }
 }
 
 async function toggleDevice(device, value) {

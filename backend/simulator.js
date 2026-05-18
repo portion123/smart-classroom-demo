@@ -1,6 +1,9 @@
 const HISTORY_LIMIT = 160
 const ALARM_LIMIT = 80
 const TICK_SECONDS = 3
+const TICK_MS = TICK_SECONDS * 1000
+const SIM_TIMEZONE = 'Asia/Shanghai'
+const HISTORY_SYNC_TOLERANCE_MS = 1500
 
 export const classroomState = {
   classroomId: 'A205',
@@ -19,13 +22,16 @@ export const classroomState = {
     curtain: { on: true, online: true, opening: 60 },
     multimedia: { on: true, online: true, volume: 58 }
   },
-  updatedAt: formatDate(new Date())
+  currentTime: '',
+  updatedAt: '',
+  generatedAt: ''
 }
 
 const historyData = []
 const alarmRecords = []
 let lastTickAt = Date.now()
 let lastHistoryAt = 0
+syncStateTime(lastTickAt)
 
 seedHistory()
 
@@ -36,6 +42,7 @@ export function getLatestClassroom() {
 
 export function getHistoryData(limit = 72) {
   advanceSimulation()
+  ensureHistorySynced()
   return historyData.slice(-Number(limit || 72))
 }
 
@@ -68,8 +75,8 @@ export function controlDevice(payload = {}) {
   if (action === 'off') device.on = false
 
   applyDevicePayload(key, device, payload)
-  classroomState.updatedAt = formatDate(new Date())
-  appendHistoryPoint()
+  syncStateTime(lastTickAt)
+  appendHistoryPoint(lastTickAt)
   appendCurrentAlarms()
 
   return {
@@ -95,23 +102,26 @@ export function buildAnalysisContext() {
 
 function advanceSimulation() {
   const now = Date.now()
-  const elapsed = Math.max(1, Math.min(30, Math.floor((now - lastTickAt) / 1000)))
-  const steps = Math.max(1, Math.min(10, Math.ceil(elapsed / TICK_SECONDS)))
-
-  for (let index = 0; index < steps; index += 1) {
-    simulateStep(TICK_SECONDS)
+  const elapsed = now - lastTickAt
+  const steps = Math.min(10, Math.floor(elapsed / TICK_MS))
+  if (steps <= 0) {
+    syncStateTime(lastTickAt)
+    return
   }
 
-  lastTickAt = now
-  classroomState.updatedAt = formatDate(new Date(now))
-  if (now - lastHistoryAt >= 5000) appendHistoryPoint()
+  for (let index = 0; index < steps; index += 1) {
+    lastTickAt += TICK_MS
+    simulateStep(lastTickAt)
+    syncStateTime(lastTickAt)
+  }
+  if (now - lastHistoryAt >= 5000) appendHistoryPoint(lastTickAt)
 }
 
-function simulateStep(seconds) {
-  const now = new Date()
-  const hour = now.getHours() + now.getMinutes() / 60
+function simulateStep(tickMs) {
+  const now = new Date(tickMs)
+  const hour = getHourInTimezone(now, SIM_TIMEZONE)
   const activeScore = hour >= 8 && hour <= 21 ? 1 : 0.2
-  const classWave = Math.sin(Date.now() / 1000 / 95)
+  const classWave = Math.sin(tickMs / 1000 / 95)
   const peopleTarget = activeScore ? 38 + classWave * 9 + smoothNoise(3) : 9 + smoothNoise(2)
 
   classroomState.peopleCount = Math.round(approach(classroomState.peopleCount, peopleTarget, 0.08, 3, 60))
@@ -122,11 +132,11 @@ function simulateStep(seconds) {
   const curtain = classroomState.devices.curtain
   const multimedia = classroomState.devices.multimedia
 
-  const ambientTemperature = 27.5 + Math.sin(Date.now() / 1000 / 180) * 1.7 + classroomState.peopleCount * 0.025
+  const ambientTemperature = 27.5 + Math.sin(tickMs / 1000 / 180) * 1.7 + classroomState.peopleCount * 0.025
   const temperatureTarget = ac.on && ac.online ? ac.targetTemperature : ambientTemperature + (light.on ? 0.25 : 0)
   classroomState.temperature = round1(approach(classroomState.temperature, temperatureTarget, ac.on && ac.online ? 0.13 : 0.045, 22, 33.5))
 
-  const humidityTarget = 58 + Math.cos(Date.now() / 1000 / 150) * 6 + (freshAir.on && freshAir.online ? -2.5 : 3)
+  const humidityTarget = 58 + Math.cos(tickMs / 1000 / 150) * 6 + (freshAir.on && freshAir.online ? -2.5 : 3)
   classroomState.humidity = round1(approach(classroomState.humidity, humidityTarget, 0.055, 38, 82))
 
   const co2Target = 520 + classroomState.peopleCount * 13 + (freshAir.on && freshAir.online ? -160 : 330)
@@ -151,18 +161,19 @@ function simulateStep(seconds) {
     (multimedia.on && multimedia.online ? multimedia.volume * 0.017 : 0.1)
   classroomState.energy = round1(approach(classroomState.energy, energyTarget, 0.12, 3, 28))
 
-  if (seconds > 0) {
+  if (tickMs > 0) {
     Object.values(classroomState.devices).forEach((device) => {
       if (Math.random() < 0.0003) device.online = false
     })
   }
 }
 
-function appendHistoryPoint() {
-  const item = historyItem()
+function appendHistoryPoint(timestampMs = lastTickAt) {
+  const item = historyItem(timestampMs)
+  if (historyData.length && historyData[historyData.length - 1].generatedAt === item.generatedAt) return
   historyData.push(item)
   if (historyData.length > HISTORY_LIMIT) historyData.splice(0, historyData.length - HISTORY_LIMIT)
-  lastHistoryAt = Date.now()
+  lastHistoryAt = timestampMs
 }
 
 function appendCurrentAlarms() {
@@ -176,13 +187,13 @@ function appendCurrentAlarms() {
       exists.value = alarm.value
       return
     }
-    alarmRecords.unshift({ ...alarm, key, id: `${key}-${Date.now()}` })
+    alarmRecords.unshift({ ...alarm, key, id: `${key}-${alarm.generatedAt || classroomState.generatedAt}` })
   })
   if (alarmRecords.length > ALARM_LIMIT) alarmRecords.splice(ALARM_LIMIT)
 }
 
 function buildCurrentAlarms() {
-  const now = classroomState.updatedAt
+  const now = classroomState.currentTime
   const records = []
   if (classroomState.co2 > 1000) {
     records.push({
@@ -230,28 +241,40 @@ function buildCurrentAlarms() {
       })
     }
   })
-  return records
+  return records.map((item) => ({
+    ...item,
+    currentTime: now,
+    updatedAt: now,
+    generatedAt: now
+  }))
 }
 
 function seedHistory() {
+  const nowMs = Date.now()
   const savedTick = lastTickAt
   const start = Date.now() - 72 * 5 * 60 * 1000
   for (let index = 0; index < 72; index += 1) {
     const t = start + index * 5 * 60 * 1000
     lastTickAt = t
-    simulateStep(TICK_SECONDS)
-    classroomState.updatedAt = formatDate(new Date(t))
-    historyData.push(historyItem(new Date(t)))
+    simulateStep(t)
+    syncStateTime(t)
+    historyData.push(historyItem(t))
   }
-  lastTickAt = savedTick
-  classroomState.updatedAt = formatDate(new Date())
-  lastHistoryAt = Date.now()
+  lastTickAt = Math.max(savedTick, nowMs)
+  syncStateTime(lastTickAt)
+  lastHistoryAt = lastTickAt
 }
 
-function historyItem(date = new Date()) {
+function historyItem(timestampMs = lastTickAt) {
+  const date = new Date(timestampMs)
+  const stamp = formatDate(date)
   return {
     time: formatTime(date),
-    date: `${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`,
+    date: formatMonthDay(date),
+    currentTime: stamp,
+    updatedAt: stamp,
+    update_time: stamp,
+    generatedAt: stamp,
     classroom_id: classroomState.classroomId,
     classroomId: classroomState.classroomId,
     temperature: classroomState.temperature,
@@ -281,7 +304,9 @@ function serializeState() {
     pm25: classroomState.pm25,
     noise: classroomState.noise,
     devices: serializedDevices,
+    currentTime: classroomState.currentTime,
     updatedAt: classroomState.updatedAt,
+    generatedAt: classroomState.generatedAt,
     update_time: classroomState.updatedAt,
     status: statusByState(),
     ...deviceStatuses()
@@ -369,12 +394,77 @@ function round1(value) {
   return Math.round(value * 10) / 10
 }
 
+function syncStateTime(timestampMs) {
+  const date = new Date(timestampMs)
+  const stamp = formatDate(date)
+  classroomState.currentTime = stamp
+  classroomState.updatedAt = stamp
+  classroomState.generatedAt = stamp
+}
+
+function ensureHistorySynced() {
+  if (!historyData.length) {
+    appendHistoryPoint(lastTickAt)
+    return
+  }
+  const last = historyData[historyData.length - 1]
+  const lastMs = parseDateTime(last.generatedAt)
+  const currentMs = parseDateTime(classroomState.generatedAt)
+  if (!Number.isFinite(lastMs) || !Number.isFinite(currentMs) || Math.abs(currentMs - lastMs) > HISTORY_SYNC_TOLERANCE_MS) {
+    appendHistoryPoint(lastTickAt)
+  }
+}
+
 function formatDate(date) {
-  const pad = (value) => String(value).padStart(2, '0')
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${formatTime(date)}`
+  const parts = getTimeParts(date, SIM_TIMEZONE)
+  return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`
 }
 
 function formatTime(date) {
-  const pad = (value) => String(value).padStart(2, '0')
-  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+  const parts = getTimeParts(date, SIM_TIMEZONE)
+  return `${parts.hour}:${parts.minute}:${parts.second}`
+}
+
+function formatMonthDay(date) {
+  const parts = getTimeParts(date, SIM_TIMEZONE)
+  return `${parts.month}-${parts.day}`
+}
+
+function getHourInTimezone(date, timezone) {
+  return Number(getTimeParts(date, timezone).hour) + Number(getTimeParts(date, timezone).minute) / 60
+}
+
+function getTimeParts(date, timezone) {
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  })
+  const map = {}
+  formatter.formatToParts(date).forEach((part) => {
+    if (part.type !== 'literal') map[part.type] = part.value
+  })
+  return map
+}
+
+function parseDateTime(value) {
+  if (!value) return NaN
+  const normalized = String(value).replace(' ', 'T')
+  const ms = Date.parse(normalized)
+  return Number.isFinite(ms) ? ms : NaN
+}
+
+export function getSimulationTime() {
+  const timestampMs = parseDateTime(classroomState.generatedAt)
+  return {
+    currentTime: classroomState.currentTime,
+    updatedAt: classroomState.updatedAt,
+    generatedAt: classroomState.generatedAt,
+    timestampMs: Number.isFinite(timestampMs) ? timestampMs : lastTickAt
+  }
 }

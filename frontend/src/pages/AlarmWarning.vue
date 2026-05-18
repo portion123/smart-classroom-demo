@@ -111,7 +111,7 @@
 </template>
 
 <script setup>
-import { computed, inject, onMounted, reactive, ref } from 'vue'
+import { computed, inject, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Bell, Download, Monitor, Operation, Timer, WarningFilled } from '@element-plus/icons-vue'
 import ChartPanel from '../components/ChartPanel.vue'
@@ -124,6 +124,7 @@ const latest = ref({ temperature: '--', co2: '--', energy: '--' })
 const alarmTableRef = ref(null)
 const filters = reactive({ type: 'all', status: 'all', date: '' })
 const appNavigation = inject('appNavigation', null)
+let alarmTimer = null
 
 const totalCount = computed(() => alarms.value.length)
 const unhandledCount = computed(() => alarms.value.filter((item) => item.status === '未处理').length)
@@ -231,7 +232,7 @@ function handleStatusClick(row) {
 
 function exportAlarms() {
   const payload = {
-    exportedAt: new Date().toLocaleString('zh-CN', { hour12: false }).replaceAll('/', '-'),
+    exportedAt: latest.value.updatedAt || latest.value.update_time || latest.value.currentTime || latest.value.generatedAt || '--',
     filters: { ...filters },
     records: filteredAlarms.value
   }
@@ -264,17 +265,27 @@ function quickView(page) {
   ElMessage.success(page === 'device' ? '已切换到 A205 教室设备状态' : `已切换到${pageName}`)
 }
 
-onMounted(async () => {
+async function loadAlarmData() {
   const [latestData, alarmData] = await Promise.all([getLatestClassroom(), getAlarmList()])
   latest.value = latestData
   alarms.value = alarmData.map(normalizeAlarm)
   notifyAlertCount()
+}
+
+onMounted(async () => {
+  await loadAlarmData()
+  alarmTimer = window.setInterval(loadAlarmData, 5000)
+})
+
+onUnmounted(() => {
+  window.clearInterval(alarmTimer)
 })
 
 function normalizeAlarm(item, index) {
   return {
     id: item.id || `${item.time}-${item.type}-${index}`,
     ...item,
+    time: item.time || latest.value.updatedAt || latest.value.update_time || '--',
     classroom_id: item.classroom_id === 'A-301' ? 'A205 教室' : item.classroom_id,
     status: item.status || (index < 2 ? '未处理' : '已处理')
   }

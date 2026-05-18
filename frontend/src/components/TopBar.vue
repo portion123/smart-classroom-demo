@@ -3,13 +3,16 @@
     <div class="topbar-left">
       <el-icon><Menu /></el-icon>
     </div>
+
     <div class="title-wrap">
       <span class="title-wing left"></span>
       <h1>智慧教室环境监测与节能调控平台</h1>
       <span class="title-wing right"></span>
     </div>
+
     <div class="topbar-right">
       <div class="weather"><el-icon><Cloudy /></el-icon> 多云 26℃</div>
+
       <el-popover v-model:visible="noticeVisible" placement="bottom-end" width="330" trigger="click" popper-class="topbar-popover">
         <template #reference>
           <button class="icon-action notice-action" aria-label="通知">
@@ -29,6 +32,7 @@
           </div>
         </div>
       </el-popover>
+
       <el-dropdown trigger="click" @command="handleUserCommand">
         <button class="admin admin-action">
           <el-avatar :size="30" class="admin-avatar">
@@ -44,6 +48,7 @@
           </el-dropdown-menu>
         </template>
       </el-dropdown>
+
       <div class="clock">
         <el-icon><Calendar /></el-icon>
         <span>{{ currentTime }}</span>
@@ -56,42 +61,87 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Bell, Calendar, Cloudy, Menu, UserFilled } from '@element-plus/icons-vue'
+import { getLatestClassroom } from '../api/request'
+import { SIM_TIME_EVENT, formatClockTime, nowDateTime, parseTimeMs, resolveSimulationTime } from '../utils/simulationTime'
 
 const NOTIFICATION_KEY = 'smart_classroom_notifications'
+const BACKEND_SYNC_MS = 3000
+const CLOCK_TICK_MS = 1000
+
 const emit = defineEmits(['change-page'])
-const currentTime = ref('')
+const currentTime = ref(formatClockTime(nowDateTime()))
 const noticeVisible = ref(false)
 const notifications = ref(defaultNotifications())
-let timer = null
+
+let clockTimer = null
+let syncTimer = null
+let backendAnchorMs = NaN
+let anchorCapturedAt = 0
 
 const unreadCount = computed(() => notifications.value.filter((item) => !item.read).length)
 
-function updateTime() {
-  const date = new Date()
-  const week = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'][date.getDay()]
-  const pad = (value) => String(value).padStart(2, '0')
-  currentTime.value = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}  ${week}`
+function setClockAnchor(timeText) {
+  const ms = parseTimeMs(timeText)
+  if (!Number.isFinite(ms)) return false
+  backendAnchorMs = ms
+  anchorCapturedAt = Date.now()
+  renderClock()
+  return true
+}
+
+function renderClock() {
+  const useBackendAnchor = Number.isFinite(backendAnchorMs)
+  const ms = useBackendAnchor ? backendAnchorMs + (Date.now() - anchorCapturedAt) : Date.now()
+  currentTime.value = formatClockTime(ms)
+}
+
+async function syncClockFromBackend() {
+  try {
+    const latest = await getLatestClassroom()
+    const updatedAt = resolveSimulationTime(latest)
+    if (!setClockAnchor(updatedAt)) {
+      backendAnchorMs = NaN
+      renderClock()
+    }
+  } catch (error) {
+    if (!Number.isFinite(backendAnchorMs)) {
+      currentTime.value = formatClockTime(nowDateTime())
+    }
+  }
+}
+
+function handleSimulationTime(event) {
+  const updatedAt = event.detail?.updatedAt
+  if (!updatedAt) return
+  setClockAnchor(updatedAt)
 }
 
 onMounted(() => {
-  updateTime()
   const hasStoredNotifications = loadNotifications()
   if (!hasStoredNotifications) syncUnreadFromStoredAlerts()
+
   window.addEventListener('smart-classroom-alerts-updated', syncUnreadFromAlerts)
-  timer = window.setInterval(updateTime, 1000)
+  window.addEventListener(SIM_TIME_EVENT, handleSimulationTime)
+
+  renderClock()
+  syncClockFromBackend()
+  clockTimer = window.setInterval(renderClock, CLOCK_TICK_MS)
+  syncTimer = window.setInterval(syncClockFromBackend, BACKEND_SYNC_MS)
 })
 
 onUnmounted(() => {
-  window.clearInterval(timer)
+  window.clearInterval(clockTimer)
+  window.clearInterval(syncTimer)
   window.removeEventListener('smart-classroom-alerts-updated', syncUnreadFromAlerts)
+  window.removeEventListener(SIM_TIME_EVENT, handleSimulationTime)
 })
 
 function defaultNotifications() {
   return [
-    { id: 'co2', title: 'CO₂超标', content: 'A205 教室 CO₂ 浓度偏高，请关注通风。', read: false },
-    { id: 'pm25', title: 'PM2.5提醒', content: 'PM2.5 数据接近阈值，建议检查空气质量。', read: false },
-    { id: 'people', title: '人数过多', content: 'A205 当前人数较多，通风负荷上升。', read: false },
-    { id: 'humidity', title: '湿度偏高', content: '湿度超过舒适区间，建议检查除湿策略。', read: false }
+    { id: 'co2', title: 'CO2提醒', content: 'A205 教室 CO2 浓度偏高，请关注通风。', read: false },
+    { id: 'pm25', title: 'PM2.5提醒', content: 'PM2.5 接近阈值，建议检查空气质量。', read: false },
+    { id: 'people', title: '人数提醒', content: 'A205 当前人数较高，通风负荷上升。', read: false },
+    { id: 'humidity', title: '湿度提醒', content: '湿度偏高，建议检查除湿策略。', read: false }
   ]
 }
 
@@ -127,9 +177,10 @@ function syncUnreadFromStoredAlerts() {
     if (!raw) return
     const records = JSON.parse(raw)
     if (!Array.isArray(records)) return
-    applyUnreadCount(records.filter((item) => item.status === '未处理').length)
+    const count = records.filter((item) => !/已|handled|resolved|done/i.test(String(item.status || ''))).length
+    applyUnreadCount(count)
   } catch (error) {
-    // 本地报警缓存异常时保持默认通知即可
+    // ignore local parse errors
   }
 }
 
@@ -149,10 +200,12 @@ async function handleUserCommand(command) {
       dangerouslyUseHTMLString: true
     })
   }
+
   if (command === 'settings') {
     emit('change-page', 'settings')
     ElMessage.success('已切换到系统设置')
   }
+
   if (command === 'logout') {
     try {
       await ElMessageBox.confirm('确认退出登录吗？', '退出登录', {
@@ -162,7 +215,7 @@ async function handleUserCommand(command) {
       })
       ElMessage.success('已退出登录（模拟）')
     } catch (error) {
-      // 用户取消时无需提示
+      // user canceled
     }
   }
 }

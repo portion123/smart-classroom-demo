@@ -151,7 +151,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { CircleCheck, Connection, MagicStick, Monitor, View, Warning } from '@element-plus/icons-vue'
 import ChartPanel from '../components/ChartPanel.vue'
@@ -163,9 +163,13 @@ const analysis = ref('')
 const aiResult = ref(null)
 const aiMode = ref('')
 const aiError = ref('')
+const analysisTime = ref('')
+const analysisIsCached = ref(false)
 const loading = ref(false)
 const optimizationLoading = ref(false)
 const previewVisible = ref(false)
+const analysisCache = ref({ key: '', payload: null, analysisTime: '' })
+let refreshTimer = null
 const optimization = ref({
   ac: '维持26℃，适时调节',
   ventilation: '中档运行，按需通风',
@@ -205,6 +209,23 @@ const currentClassroomPayload = computed(() => ({
     multimedia_status: latest.value.multimedia_status || 'on'
   }
 }))
+
+function buildAnalysisCacheKey() {
+  return [
+    latest.value.classroom_id || latest.value.room || 'A205',
+    latest.value.temperature,
+    latest.value.humidity,
+    latest.value.co2,
+    latest.value.energy,
+    latest.value.update_time || latest.value.updatedAt
+  ].join('|')
+}
+
+async function refreshRealtimeData() {
+  const [latestData, historyData] = await Promise.all([getLatestClassroom(), getHistoryData()])
+  latest.value = latestData
+  history.value = historyData
+}
 
 const desks = Array.from({ length: 15 }, (_, index) => {
   const row = Math.floor(index / 5)
@@ -295,12 +316,31 @@ function normalizeTextList(value, fallback) {
 async function generate() {
   loading.value = true
   try {
+    const cacheKey = buildAnalysisCacheKey()
+    if (analysisCache.value.payload && analysisCache.value.key === cacheKey) {
+      analysisIsCached.value = true
+      applyAiResult(analysisCache.value.payload, { showSuccess: true, fromCache: true })
+      analysisTime.value =
+        analysisCache.value.analysisTime ||
+        analysisCache.value.payload?.analysisTime ||
+        latest.value.update_time ||
+        latest.value.updatedAt
+      return
+    }
+
     const result = await analyzeAi(currentClassroomPayload.value)
-    applyAiResult(result, { showSuccess: true })
+    analysisCache.value = {
+      key: cacheKey,
+      payload: result,
+      analysisTime: result.analysisTime || result.update_time || result.updatedAt || latest.value.update_time
+    }
+    analysisIsCached.value = false
+    applyAiResult(result, { showSuccess: true, fromCache: false })
   } catch (error) {
     analysis.value = mockAnalysisText
     aiResult.value = null
     aiMode.value = 'mock'
+    analysisIsCached.value = false
     aiError.value = error?.message || '前端调用 AI 分析失败'
     ElMessage.error('AI 分析失败，已使用本地 mock 结果')
   } finally {
@@ -311,9 +351,10 @@ async function generate() {
 async function generateOptimization() {
   optimizationLoading.value = true
   try {
-    await new Promise((resolve) => setTimeout(resolve, 1000))
-    const result = await analyzeAi(currentClassroomPayload.value)
-    applyAiResult(result)
+      await new Promise((resolve) => setTimeout(resolve, 1000))
+      const result = await analyzeAi(currentClassroomPayload.value)
+      analysisIsCached.value = false
+      applyAiResult(result)
     applyOptimizationFromAi(result?.result)
     await ElMessageBox.alert('空调设为 26℃；新风开启；灯光亮度调整为 80%；预计节能 18%。', '优化方案已生成', {
       confirmButtonText: '知道了',
@@ -338,7 +379,25 @@ function applyAiResult(result, options = {}) {
   aiMode.value = result?.mode || (result?.fallback ? 'mock' : '')
   aiError.value = result?.error || result?.errorMessage || ''
   analysis.value = result?.analysis || formatStructuredAnalysis(structured) || mockAnalysisText
-  latest.value.update_time = result?.update_time || latest.value.update_time
+  if (options.fromCache && !analysis.value.startsWith('【缓存分析】')) {
+    analysis.value = `【缓存分析】\n${analysis.value}`
+  }
+  const resolvedTime =
+    result?.analysisTime ||
+    result?.updatedAt ||
+    result?.update_time ||
+    latest.value.updatedAt ||
+    latest.value.update_time
+  if (resolvedTime) {
+    analysisTime.value = resolvedTime
+    latest.value = {
+      ...latest.value,
+      updatedAt: resolvedTime,
+      update_time: resolvedTime,
+      currentTime: resolvedTime,
+      generatedAt: resolvedTime
+    }
+  }
   if (result?.mode === 'llm') {
     ElMessage.success('AI 实时分析结果已生成')
   } else if (result?.fallback || result?.mode === 'mock') {
@@ -365,7 +424,8 @@ function applyOptimizationFromAi(result = aiResult.value) {
     temperature: 26,
     co2: 1000,
     ventilation_status: 'on',
-    update_time: new Date().toLocaleString('zh-CN', { hour12: false }).replaceAll('/', '-')
+    update_time: analysisTime.value || latest.value.update_time || latest.value.updatedAt,
+    updatedAt: analysisTime.value || latest.value.updatedAt || latest.value.update_time
   }
 }
 
@@ -380,10 +440,13 @@ function formatStructuredAnalysis(result) {
 }
 
 onMounted(async () => {
-  const [latestData, historyData] = await Promise.all([getLatestClassroom(), getHistoryData()])
-  latest.value = latestData
-  history.value = historyData
+  await refreshRealtimeData()
   await generate()
+  refreshTimer = window.setInterval(refreshRealtimeData, 5000)
+})
+
+onUnmounted(() => {
+  window.clearInterval(refreshTimer)
 })
 </script>
 

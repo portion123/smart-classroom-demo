@@ -107,7 +107,7 @@
 </template>
 
 <script setup>
-import { computed, inject, onMounted, reactive, ref } from 'vue'
+import { computed, inject, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Connection, Histogram, Monitor, Sunny, Timer, TrendCharts, UserFilled } from '@element-plus/icons-vue'
 import ChartPanel from '../components/ChartPanel.vue'
@@ -117,6 +117,7 @@ import { getHistoryData } from '../api/request'
 const filters = reactive({ classroom: 'A205', range: '', granularity: '15m' })
 const history = ref([])
 const appNavigation = inject('appNavigation', null)
+let historyTimer = null
 
 const stats = computed(() => [
   { icon: TrendCharts, label: '历史平均温度', value: average('temperature'), unit: '℃', status: 'normal', trend: '较上周 -0.6℃', tone: 'green' },
@@ -129,7 +130,7 @@ const stats = computed(() => [
 const tableRows = computed(() =>
   history.value.slice(-9).reverse().map((item, index) => ({
     ...item,
-    time: `2025-05-23 ${item.time || `10:${String(index * 15).padStart(2, '0')}`}`
+    time: item.generatedAt || item.currentTime || item.updatedAt || item.update_time || item.time || `--:${String(index * 5).padStart(2, '0')}:00`
   }))
 )
 
@@ -218,8 +219,18 @@ function openDeviceDetail() {
   ElMessage.success('已切换到 A205 教室设备详情')
 }
 
+async function refreshHistory() {
+  const data = await getHistoryData()
+  history.value = Array.isArray(data) ? data : []
+}
+
 onMounted(async () => {
-  history.value = await getHistoryData()
+  await refreshHistory()
+  historyTimer = window.setInterval(refreshHistory, 5000)
+})
+
+onUnmounted(() => {
+  window.clearInterval(historyTimer)
 })
 </script>
 
