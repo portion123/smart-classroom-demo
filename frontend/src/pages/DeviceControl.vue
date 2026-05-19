@@ -185,6 +185,7 @@ import { computed, inject, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { CircleCheck, Connection, Monitor, Operation, Sunny, SwitchButton, UserFilled, VideoPlay } from '@element-plus/icons-vue'
 import { controlDevice, getLatestClassroom } from '../api/request'
+import { formatDateTime } from '../utils/simulationTime'
 
 const actionLoading = ref('')
 const operationMode = ref('normal')
@@ -539,7 +540,7 @@ function applyBackendState(data) {
 
 function addLog(device, content) {
   logs.value.unshift({
-    time: latest.value.updatedAt || latest.value.update_time || new Date().toLocaleString('zh-CN', { hour12: false }).replaceAll('/', '-'),
+    time: latest.value.updatedAt || latest.value.update_time || formatDateTime(new Date()),
     device,
     content,
     operator: '管理员',

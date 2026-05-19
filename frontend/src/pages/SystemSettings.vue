@@ -123,8 +123,8 @@
 
         <section class="glass-card system-status">
           <div class="setting-title"><el-icon><Timer /></el-icon><h3>系统运行时间</h3></div>
-          <strong class="uptime">15 天 07 小时 24 分钟</strong>
-          <div class="status-kv"><span>最后重启时间</span><b>2025-05-08 02:15:12</b></div>
+          <strong class="uptime">{{ uptimeText }}</strong>
+          <div class="status-kv"><span>最后重启时间</span><b>{{ lastRestartTime }}</b></div>
         </section>
 
         <el-button class="primary-gradient log-button" :icon="Document" @click="viewLogs">查看系统日志</el-button>
@@ -144,9 +144,10 @@
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElLoading, ElMessage, ElMessageBox } from 'element-plus'
 import { Bell, Cpu, Delete, Document, Download, Message, Refresh, Setting, Timer, Tools, UserFilled } from '@element-plus/icons-vue'
+import { formatDateTime } from '../utils/simulationTime'
 
 const SYSTEM_SETTINGS_KEY = 'smart_classroom_system_settings'
 const SYSTEM_USERS_KEY = 'smart_classroom_users'
@@ -185,7 +186,8 @@ const defaultNotifications = [
   { key: 'wechat', field: 'wechatNotification', label: '微信通知', desc: '通过企业微信推送消息' }
 ]
 
-const defaultStorage = { days: 180, backup: 'day', time: new Date(2025, 4, 23, 2, 0), formats: ['CSV', 'Excel', 'JSON'], autoClean: true }
+const bootTime = new Date(Date.now() - (15 * 24 * 60 * 60 * 1000 + 7 * 60 * 60 * 1000 + 24 * 60 * 1000))
+const defaultStorage = { days: 180, backup: 'day', time: new Date(), formats: ['CSV', 'Excel', 'JSON'], autoClean: true }
 
 const form = reactive({ ...defaultSettings })
 const thresholds = defaultThresholds
@@ -196,11 +198,20 @@ const savingSettings = ref(false)
 const toolLoading = ref('')
 const logDialogVisible = ref(false)
 
+const uptimeText = computed(() => {
+  const diff = Date.now() - bootTime.getTime()
+  const days = Math.floor(diff / 86400000)
+  const hours = Math.floor((diff % 86400000) / 3600000)
+  const minutes = Math.floor((diff % 3600000) / 60000)
+  return `${days} 天 ${String(hours).padStart(2, '0')} 小时 ${String(minutes).padStart(2, '0')} 分钟`
+})
+const lastRestartTime = computed(() => formatDateTime(bootTime))
+
 const mockLogs = [
-  { time: '2026-05-17 13:42:18', level: 'INFO', content: '系统设置页面读取本地配置成功。' },
-  { time: '2026-05-17 13:41:06', level: 'INFO', content: '设备控制策略同步完成。' },
-  { time: '2026-05-17 13:39:52', level: 'WARN', content: 'AI 分析接口不可用，已启用前端 mock 结果。' },
-  { time: '2026-05-17 13:38:30', level: 'INFO', content: '用户权限状态已更新。' }
+  { time: offsetTime(2 * 60 * 1000), level: 'INFO', content: '系统设置页面读取本地配置成功。' },
+  { time: offsetTime(4 * 60 * 1000), level: 'INFO', content: '设备控制策略同步完成。' },
+  { time: offsetTime(6 * 60 * 1000), level: 'WARN', content: 'AI 分析接口不可用，已启用前端 mock 结果。' },
+  { time: offsetTime(8 * 60 * 1000), level: 'INFO', content: '用户权限状态已更新。' }
 ]
 
 onMounted(() => {
@@ -210,11 +221,15 @@ onMounted(() => {
 
 function defaultUsers() {
   return [
-    { name: 'admin', role: '超级管理员', status: '启用', login: '2025-05-23 10:12' },
-    { name: 'teacher01', role: '教师', status: '启用', login: '2025-05-23 09:48' },
-    { name: 'operator01', role: '运维人员', status: '启用', login: '2025-05-22 18:30' },
-    { name: 'viewer01', role: '查看者', status: '启用', login: '2025-05-22 16:05' }
+    { name: 'admin', role: '超级管理员', status: '启用', login: offsetTime(12 * 60 * 1000) },
+    { name: 'teacher01', role: '教师', status: '启用', login: offsetTime(48 * 60 * 1000) },
+    { name: 'operator01', role: '运维人员', status: '启用', login: offsetTime(2 * 60 * 60 * 1000) },
+    { name: 'viewer01', role: '查看者', status: '启用', login: offsetTime(3 * 60 * 60 * 1000) }
   ]
+}
+
+function offsetTime(offsetMs) {
+  return formatDateTime(Date.now() - offsetMs)
 }
 
 function loadSettings() {
@@ -263,7 +278,7 @@ async function exportData() {
   toolLoading.value = 'export'
   await wait(500)
   const payload = {
-    exportedAt: new Date().toLocaleString('zh-CN', { hour12: false }).replaceAll('/', '-'),
+    exportedAt: formatDateTime(new Date()),
     settings: currentSettings(),
     users: users.map((item) => ({ ...item }))
   }

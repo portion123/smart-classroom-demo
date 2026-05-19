@@ -58,64 +58,25 @@
 </template>
 
 <script setup>
-import { computed, inject, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Bell, Calendar, Cloudy, Menu, UserFilled } from '@element-plus/icons-vue'
-import { getLatestClassroom } from '../api/request'
-import { SIM_TIME_EVENT, formatClockTime, nowDateTime, parseTimeMs, resolveSimulationTime } from '../utils/simulationTime'
+import { formatClockTime } from '../utils/simulationTime'
 
 const NOTIFICATION_KEY = 'smart_classroom_notifications'
-const BACKEND_SYNC_MS = 3000
 const CLOCK_TICK_MS = 1000
 
 const emit = defineEmits(['change-page'])
-const appNavigation = inject('appNavigation', null)
-const selectedClassroom = computed(() => appNavigation?.selectedClassroom?.value || 'A205')
-const currentTime = ref(formatClockTime(nowDateTime()))
+const currentTime = ref(formatClockTime(new Date()))
 const noticeVisible = ref(false)
 const notifications = ref(defaultNotifications())
 
 let clockTimer = null
-let syncTimer = null
-let backendAnchorMs = NaN
-let anchorCapturedAt = 0
 
 const unreadCount = computed(() => notifications.value.filter((item) => !item.read).length)
 
-function setClockAnchor(timeText) {
-  const ms = parseTimeMs(timeText)
-  if (!Number.isFinite(ms)) return false
-  backendAnchorMs = ms
-  anchorCapturedAt = Date.now()
-  renderClock()
-  return true
-}
-
 function renderClock() {
-  const useBackendAnchor = Number.isFinite(backendAnchorMs)
-  const ms = useBackendAnchor ? backendAnchorMs + (Date.now() - anchorCapturedAt) : Date.now()
-  currentTime.value = formatClockTime(ms)
-}
-
-async function syncClockFromBackend() {
-  try {
-    const latest = await getLatestClassroom(selectedClassroom.value)
-    const updatedAt = resolveSimulationTime(latest)
-    if (!setClockAnchor(updatedAt)) {
-      backendAnchorMs = NaN
-      renderClock()
-    }
-  } catch (error) {
-    if (!Number.isFinite(backendAnchorMs)) {
-      currentTime.value = formatClockTime(nowDateTime())
-    }
-  }
-}
-
-function handleSimulationTime(event) {
-  const updatedAt = event.detail?.updatedAt
-  if (!updatedAt) return
-  setClockAnchor(updatedAt)
+  currentTime.value = formatClockTime(new Date())
 }
 
 onMounted(() => {
@@ -123,19 +84,14 @@ onMounted(() => {
   if (!hasStoredNotifications) syncUnreadFromStoredAlerts()
 
   window.addEventListener('smart-classroom-alerts-updated', syncUnreadFromAlerts)
-  window.addEventListener(SIM_TIME_EVENT, handleSimulationTime)
 
   renderClock()
-  syncClockFromBackend()
   clockTimer = window.setInterval(renderClock, CLOCK_TICK_MS)
-  syncTimer = window.setInterval(syncClockFromBackend, BACKEND_SYNC_MS)
 })
 
 onUnmounted(() => {
   window.clearInterval(clockTimer)
-  window.clearInterval(syncTimer)
   window.removeEventListener('smart-classroom-alerts-updated', syncUnreadFromAlerts)
-  window.removeEventListener(SIM_TIME_EVENT, handleSimulationTime)
 })
 
 function defaultNotifications() {
