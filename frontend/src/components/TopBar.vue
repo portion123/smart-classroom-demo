@@ -58,7 +58,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, inject, onMounted, onUnmounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Bell, Calendar, Cloudy, Menu, UserFilled } from '@element-plus/icons-vue'
 import { getLatestClassroom } from '../api/request'
@@ -69,6 +69,8 @@ const BACKEND_SYNC_MS = 3000
 const CLOCK_TICK_MS = 1000
 
 const emit = defineEmits(['change-page'])
+const appNavigation = inject('appNavigation', null)
+const selectedClassroom = computed(() => appNavigation?.selectedClassroom?.value || 'A205')
 const currentTime = ref(formatClockTime(nowDateTime()))
 const noticeVisible = ref(false)
 const notifications = ref(defaultNotifications())
@@ -97,7 +99,7 @@ function renderClock() {
 
 async function syncClockFromBackend() {
   try {
-    const latest = await getLatestClassroom()
+    const latest = await getLatestClassroom(selectedClassroom.value)
     const updatedAt = resolveSimulationTime(latest)
     if (!setClockAnchor(updatedAt)) {
       backendAnchorMs = NaN

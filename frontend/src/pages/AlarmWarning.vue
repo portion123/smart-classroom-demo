@@ -15,14 +15,16 @@
 
         <section class="alarm-chart-grid">
           <ChartPanel title="报警类型分布" :option="typeOption" height="270px" />
-          <ChartPanel title="报警趋势（近7天）" :option="trendOption" height="270px" />
+          <ChartPanel title="报警趋势（最近数据）" :option="trendOption" height="270px" />
         </section>
 
         <section class="filter-bar alarm-filter">
           <el-select v-model="filters.type" style="width: 190px">
             <el-option label="全部类型" value="all" />
-            <el-option label="CO₂超标" value="CO2" />
-            <el-option label="温度偏高" value="temperature" />
+            <el-option label="空气质量" value="空气" />
+            <el-option label="温度" value="温度" />
+            <el-option label="能耗" value="能耗" />
+            <el-option label="设备" value="设备" />
           </el-select>
           <el-select v-model="filters.status" style="width: 190px">
             <el-option label="全部状态" value="all" />
@@ -35,7 +37,7 @@
 
         <section ref="alarmTableRef" class="glass-card">
           <div class="data-table">
-            <el-table :data="filteredAlarms" height="330" size="small">
+            <el-table :data="filteredAlarms" height="330" size="small" empty-text="暂无异常">
               <el-table-column prop="time" label="报警时间" min-width="160" />
               <el-table-column prop="classroom_id" label="教室" width="110" />
               <el-table-column prop="type" label="报警类型" width="130" />
@@ -48,8 +50,8 @@
               <el-table-column label="状态" width="120">
                 <template #default="{ row }">
                   <el-tag
-                    :class="{ 'status-clickable': row.status === '未处理' }"
-                    :type="row.status === '未处理' ? 'danger' : 'success'"
+                    :class="{ 'status-clickable': isUnhandled(row.status) }"
+                    :type="isUnhandled(row.status) ? 'danger' : 'success'"
                     effect="dark"
                     round
                     @click="handleStatusClick(row)"
@@ -61,7 +63,7 @@
               <el-table-column label="操作" width="150">
                 <template #default="{ row }">
                   <el-button link type="primary" @click="showAlarmDetail(row)">详情</el-button>
-                  <el-button v-if="row.status === '未处理'" link type="primary" @click="confirmProcessAlarm(row)">处理</el-button>
+                  <el-button v-if="isUnhandled(row.status)" link type="primary" @click="confirmProcessAlarm(row)">处理</el-button>
                   <el-button v-else link type="primary" @click="showAlarmDetail(row)">查看</el-button>
                 </template>
               </el-table-column>
@@ -75,20 +77,20 @@
         <section class="glass-card current-room">
           <div class="panel-head"><h3>当前教室</h3></div>
           <div class="current-room-body">
-            <h2>A205 教室</h2>
+            <h2>{{ roomTitle }}</h2>
             <div class="side-room-photo"></div>
-            <div class="room-kv"><span>设备运行</span><b>正常</b></div>
-            <div class="room-kv"><span>整体舒适度</span><b>舒适</b></div>
-            <div class="room-kv"><span>温度</span><b>{{ latest.temperature }}℃</b></div>
-            <div class="room-kv"><span>CO₂浓度</span><b>{{ latest.co2 }} ppm</b></div>
-            <div class="room-kv"><span>能耗</span><b>{{ latest.energy }} kWh</b></div>
+            <div class="room-kv"><span>楼栋楼层</span><b>{{ latest.building || '-' }} · {{ latest.floor || '-' }}</b></div>
+            <div class="room-kv"><span>整体舒适度</span><b>{{ comfortText }}</b></div>
+            <div class="room-kv"><span>温度</span><b>{{ latest.temperature ?? '-' }}℃</b></div>
+            <div class="room-kv"><span>CO2 浓度</span><b>{{ latest.co2 ?? '-' }} ppm</b></div>
+            <div class="room-kv"><span>能耗</span><b>{{ latest.energy ?? '-' }} kW</b></div>
           </div>
         </section>
 
         <section class="glass-card">
           <div class="panel-head"><h3>今日报警概览</h3></div>
           <div class="donut-summary">
-            <div class="donut-ring"><strong>{{ totalCount || 28 }}</strong><span>总数</span></div>
+            <div class="donut-ring"><strong>{{ totalCount }}</strong><span>总数</span></div>
             <div>
               <p><i class="red-dot"></i>未处理 {{ unhandledCount }} ({{ unhandledPercent }}%)</p>
               <p><i class="green-dot"></i>已处理 {{ handledCount }} ({{ handledPercent }}%)</p>
@@ -111,44 +113,48 @@
 </template>
 
 <script setup>
-import { computed, inject, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { computed, inject, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Bell, Download, Monitor, Operation, Timer, WarningFilled } from '@element-plus/icons-vue'
 import ChartPanel from '../components/ChartPanel.vue'
 import { getAlarmList, getLatestClassroom } from '../api/request'
 
-const ALERT_RECORDS_KEY = 'smart_classroom_alert_records'
-
+const appNavigation = inject('appNavigation', null)
+const selectedClassroom = computed(() => appNavigation?.selectedClassroom?.value || 'A205')
 const alarms = ref([])
-const latest = ref({ temperature: '--', co2: '--', energy: '--' })
+const latest = ref({ classroomId: selectedClassroom.value, classroomName: `${selectedClassroom.value} 教室`, temperature: '--', co2: '--', energy: '--' })
 const alarmTableRef = ref(null)
 const filters = reactive({ type: 'all', status: 'all', date: '' })
-const appNavigation = inject('appNavigation', null)
 let alarmTimer = null
 
+const currentClassroomId = computed(() => latest.value.classroomId || latest.value.classroom_id || selectedClassroom.value)
+const roomTitle = computed(() => latest.value.classroomName || latest.value.name || `${currentClassroomId.value} 教室`)
+const comfortText = computed(() => latest.value.status === 'warning' || latest.value.status === 'danger' ? '需关注' : '舒适')
+
 const totalCount = computed(() => alarms.value.length)
-const unhandledCount = computed(() => alarms.value.filter((item) => item.status === '未处理').length)
+const unhandledCount = computed(() => alarms.value.filter((item) => isUnhandled(item.status)).length)
 const handledCount = computed(() => totalCount.value - unhandledCount.value)
 const handledPercent = computed(() => (totalCount.value ? Math.round((handledCount.value / totalCount.value) * 100) : 0))
 const unhandledPercent = computed(() => (totalCount.value ? Math.round((unhandledCount.value / totalCount.value) * 100) : 0))
 
 const alarmStats = computed(() => [
-  { label: '今日报警总数', value: totalCount.value || 28, trend: '较昨日 ↑ 27%', icon: Bell, tone: 'red' },
-  { label: '未处理报警', value: unhandledCount.value, trend: '较昨日 ↑ 16%', icon: WarningFilled, tone: 'orange' },
-  { label: '已处理报警', value: handledCount.value, trend: '较昨日 ↑ 35%', icon: WarningFilled, tone: 'yellow' },
-  { label: '处理及时率', value: `${handledPercent.value}%`, trend: '较昨日 ↑ 8%', icon: Timer, tone: 'blue' }
+  { label: '当前报警总数', value: totalCount.value, trend: roomTitle.value, icon: Bell, tone: 'red' },
+  { label: '未处理报警', value: unhandledCount.value, trend: unhandledCount.value ? '需要处理' : '暂无异常', icon: WarningFilled, tone: 'orange' },
+  { label: '已处理报警', value: handledCount.value, trend: '当前页面状态', icon: WarningFilled, tone: 'yellow' },
+  { label: '处理及时率', value: `${handledPercent.value}%`, trend: '动态统计', icon: Timer, tone: 'blue' }
 ])
 
 const filteredAlarms = computed(() =>
   alarms.value.filter((item) => {
-    const typeMatched = filters.type === 'all' || item.type.includes(filters.type)
+    const typeMatched = filters.type === 'all' || String(item.type || '').includes(filters.type)
     const statusMatched = filters.status === 'all' || item.status === filters.status
     return typeMatched && statusMatched
   })
 )
+
 const alarmTypeData = computed(() => {
   const counts = alarms.value.reduce((result, item) => {
-    result[item.type] = (result[item.type] || 0) + 1
+    result[item.type || '未知报警'] = (result[item.type || '未知报警'] || 0) + 1
     return result
   }, {})
   const data = Object.entries(counts).map(([name, value]) => ({ name, value }))
@@ -175,20 +181,27 @@ const trendOption = computed(() => ({
   color: ['#1497ff'],
   tooltip: { trigger: 'axis', backgroundColor: 'rgba(4,18,42,.92)', borderColor: '#1a9cff', textStyle: { color: '#eaf6ff' } },
   grid: { left: 42, right: 26, top: 38, bottom: 32 },
-  xAxis: { type: 'category', data: ['05-17', '05-18', '05-19', '05-20', '05-21', '05-22', '05-23'], axisLabel: { color: '#9fc2df' }, axisLine: { lineStyle: { color: 'rgba(152,204,255,.28)' } } },
-  yAxis: { type: 'value', splitLine: { lineStyle: { color: 'rgba(120,180,255,.12)', type: 'dashed' } }, axisLabel: { color: '#9fc2df' } },
-  series: [{ name: '报警数量', type: 'line', smooth: true, symbolSize: 10, data: [18, 22, 15, 26, 32, 24, 28], lineStyle: { width: 3 }, areaStyle: { color: 'rgba(20,151,255,.18)' } }]
+  xAxis: { type: 'category', data: trendLabels.value, axisLabel: { color: '#9fc2df' }, axisLine: { lineStyle: { color: 'rgba(152,204,255,.28)' } } },
+  yAxis: { type: 'value', minInterval: 1, splitLine: { lineStyle: { color: 'rgba(120,180,255,.12)', type: 'dashed' } }, axisLabel: { color: '#9fc2df' } },
+  series: [{ name: '报警数量', type: 'line', smooth: true, symbolSize: 10, data: trendValues.value, lineStyle: { width: 3 }, areaStyle: { color: 'rgba(20,151,255,.18)' } }]
 }))
 
+const trendLabels = computed(() => alarms.value.slice().reverse().map((item) => String(item.time || '').slice(5, 16)))
+const trendValues = computed(() => trendLabels.value.map((_, index) => index + 1))
+
+function isUnhandled(status) {
+  return !/已处理|handled|resolved|done/i.test(String(status || '未处理'))
+}
+
 function levelTag(level) {
-  if (level === 'danger') return 'danger'
-  if (level === 'warning') return 'warning'
+  if (level === 'danger' || level === 'high') return 'danger'
+  if (level === 'warning' || level === 'medium') return 'warning'
   return 'primary'
 }
 
 function levelText(level) {
-  if (level === 'danger') return '严重'
-  if (level === 'warning') return '警告'
+  if (level === 'danger' || level === 'high') return '严重'
+  if (level === 'warning' || level === 'medium') return '警告'
   return '提示'
 }
 
@@ -201,7 +214,7 @@ async function confirmProcessAlarm(row) {
     })
     processAlarm(row)
   } catch (error) {
-    // 用户取消时无需提示
+    // user canceled
   }
 }
 
@@ -223,15 +236,13 @@ function showAlarmDetail(row) {
 }
 
 function handleStatusClick(row) {
-  if (row.status === '未处理') {
-    confirmProcessAlarm(row)
-  } else {
-    ElMessage.success('该报警已处理')
-  }
+  if (isUnhandled(row.status)) confirmProcessAlarm(row)
+  else ElMessage.success('该报警已处理')
 }
 
 function exportAlarms() {
   const payload = {
+    classroomId: currentClassroomId.value,
     exportedAt: latest.value.updatedAt || latest.value.update_time || latest.value.currentTime || latest.value.generatedAt || '--',
     filters: { ...filters },
     records: filteredAlarms.value
@@ -240,7 +251,7 @@ function exportAlarms() {
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
-  link.download = 'smart-classroom-alarm-records.json'
+  link.download = `smart-classroom-${currentClassroomId.value}-alarm-records.json`
   document.body.appendChild(link)
   link.click()
   document.body.removeChild(link)
@@ -256,21 +267,51 @@ function quickView(page) {
     ElMessage.success('已定位到报警记录')
     return
   }
-  appNavigation?.navigateToPage?.(page, { classroom: 'A205' })
+  appNavigation?.navigateToPage?.(page, { classroom: currentClassroomId.value })
   const pageName = {
     realtime: '实时监测',
     history: '历史数据',
-    device: 'A205 教室设备状态'
+    device: `${roomTitle.value} 设备状态`
   }[page]
-  ElMessage.success(page === 'device' ? '已切换到 A205 教室设备状态' : `已切换到${pageName}`)
+  ElMessage.success(`已切换到${pageName}`)
 }
 
 async function loadAlarmData() {
-  const [latestData, alarmData] = await Promise.all([getLatestClassroom(), getAlarmList()])
+  const id = selectedClassroom.value
+  const [latestData, alarmData] = await Promise.all([getLatestClassroom(id), getAlarmList(id)])
   latest.value = latestData
   alarms.value = alarmData.map(normalizeAlarm)
   notifyAlertCount()
 }
+
+function normalizeAlarm(item, index) {
+  return {
+    id: item.id || `${item.time}-${item.type}-${index}`,
+    ...item,
+    time: item.time || item.generatedAt || latest.value.updatedAt || latest.value.update_time || '--',
+    classroom_id: item.classroomId || item.classroom_id || currentClassroomId.value,
+    status: item.status || '未处理',
+    content: item.message || item.content || `${item.type || '报警'} ${item.value ?? ''}`
+  }
+}
+
+function alarmAdvice(row) {
+  if (row.type?.includes('CO') || row.type?.includes('空气')) return '建议立即开启新风并观察 CO2 下降趋势。'
+  if (row.type?.includes('温度')) return '建议检查空调策略，并将设定温度调整到舒适区间。'
+  if (row.type?.includes('能耗')) return '建议联动关闭空置设备，并检查空调与照明运行状态。'
+  if (row.type?.includes('设备')) return '建议运维人员复核设备网关、供电和在线状态。'
+  return '建议运维人员复核现场状态并记录处理结果。'
+}
+
+function notifyAlertCount() {
+  window.dispatchEvent(new CustomEvent('smart-classroom-alerts-updated', {
+    detail: { unhandledCount: unhandledCount.value }
+  }))
+}
+
+watch(selectedClassroom, () => {
+  loadAlarmData()
+})
 
 onMounted(async () => {
   await loadAlarmData()
@@ -280,31 +321,6 @@ onMounted(async () => {
 onUnmounted(() => {
   window.clearInterval(alarmTimer)
 })
-
-function normalizeAlarm(item, index) {
-  return {
-    id: item.id || `${item.time}-${item.type}-${index}`,
-    ...item,
-    time: item.time || latest.value.updatedAt || latest.value.update_time || '--',
-    classroom_id: item.classroom_id === 'A-301' ? 'A205 教室' : item.classroom_id,
-    status: item.status || (index < 2 ? '未处理' : '已处理')
-  }
-}
-
-function alarmAdvice(row) {
-  if (row.type?.includes('CO')) return '建议立即开启新风并观察 CO₂ 下降趋势。'
-  if (row.type?.includes('湿度')) return '建议检查除湿策略或开启新风净化模式。'
-  if (row.type?.includes('PM')) return '建议开启空气净化并检查滤网状态。'
-  if (row.type?.includes('人数')) return '建议关注空间容量和通风负荷。'
-  if (row.type?.includes('噪声')) return '建议提醒课堂保持安静。'
-  return '建议运维人员复核现场状态并记录处理结果。'
-}
-
-function notifyAlertCount() {
-  window.dispatchEvent(new CustomEvent('smart-classroom-alerts-updated', {
-    detail: { unhandledCount: unhandledCount.value }
-  }))
-}
 </script>
 
 <style scoped>

@@ -2,15 +2,15 @@
   <div class="page realtime-page">
     <section class="filter-bar">
       <span class="filter-label">教室选择</span>
-      <el-select v-model="filters.classroom" style="width: 160px">
-        <el-option label="A205 教室" value="A205" />
-        <el-option label="B101 教室" value="B101" />
-        <el-option label="C301 教室" value="C301" />
+      <el-select v-model="selectedClassroom" style="width: 160px">
+        <el-option v-for="item in classroomOptions" :key="item.value" :label="item.label" :value="item.value" />
       </el-select>
       <span class="filter-label">楼宇选择</span>
       <el-select v-model="filters.building" style="width: 180px">
-        <el-option label="教学楼A栋" value="A" />
-        <el-option label="教学楼B栋" value="B" />
+        <el-option label="全部楼宇" value="all" />
+        <el-option label="教学楼 A 栋" value="A" />
+        <el-option label="教学楼 B 栋" value="B" />
+        <el-option label="综合楼 C 栋" value="C" />
       </el-select>
       <span class="filter-label">时间范围</span>
       <el-date-picker v-model="filters.range" type="daterange" start-placeholder="开始日期" end-placeholder="结束日期" style="width: 290px" />
@@ -20,7 +20,7 @@
         <el-option label="正常" value="normal" />
         <el-option label="预警" value="warning" />
       </el-select>
-      <el-button class="primary-gradient" :icon="Refresh" @click="loadData">刷新</el-button>
+      <el-button class="primary-gradient" :icon="Refresh" :loading="loading" @click="loadData">刷新</el-button>
       <el-button class="success-gradient" :icon="Download">导出</el-button>
     </section>
 
@@ -33,45 +33,45 @@
             <span v-for="i in 12" :key="i" :style="seatStyle(i)"></span>
           </div>
           <div class="summary-title">
-            <h2>A205 教室</h2>
-            <p>教学楼A栋 · 2F · 面积 86㎡</p>
+            <h2>{{ roomTitle }}</h2>
+            <p>{{ roomMeta }}</p>
           </div>
           <div class="summary-metric">
             <span>环境综合评分</span>
-            <strong>92 <small>分</small></strong>
-            <em>较昨日 ↑ 6分</em>
+            <strong>{{ environmentScore }} <small>分</small></strong>
+            <em>{{ latestStatusText }}</em>
           </div>
           <div class="summary-metric">
             <span>当前人数</span>
-            <strong>{{ latest.people_count }} <small>人</small></strong>
-            <em>额定容量 80人</em>
+            <strong>{{ peopleCount }} <small>人</small></strong>
+            <em>额定容量 {{ latest.capacity || '-' }} 人</em>
           </div>
           <div class="summary-metric device-state">
             <span>设备运行状态</span>
-            <div><b class="ok">18</b><b class="warn">1</b><b class="bad">1</b></div>
-            <em>正常 / 告警 / 离线</em>
+            <div><b class="ok">{{ deviceSummary.online }}</b><b class="warn">{{ deviceSummary.warning }}</b><b class="bad">{{ deviceSummary.offline }}</b></div>
+            <em>运行 / 告警 / 离线</em>
           </div>
           <div class="comfort">
             <el-icon><CircleCheck /></el-icon>
-            <strong>舒适</strong>
-            <span>体感温度 {{ latest.temperature }}℃</span>
+            <strong>{{ comfortText }}</strong>
+            <span>体感温度 {{ latest.temperature ?? '-' }}℃</span>
           </div>
         </section>
 
         <section class="chart-matrix">
-          <ChartPanel title="温湿度趋势" :option="tempHumidityOption" height="190px" />
-          <ChartPanel title="CO₂ 趋势（ppm）" :option="co2Option" height="190px" />
-          <ChartPanel title="PM2.5 趋势（μg/m³）" :option="pm25Option" height="190px" />
-          <ChartPanel title="噪声趋势（dB）" :option="noiseOption" height="190px" />
-          <ChartPanel title="人数热力图（按时间分布）" :option="heatmapOption" height="190px" />
-          <ChartPanel title="能耗对比（kWh）" :option="energyOption" height="190px" />
+          <ChartPanel :key="`temp-${currentClassroomId}`" title="温湿度趋势" :option="tempHumidityOption" height="190px" />
+          <ChartPanel :key="`co2-${currentClassroomId}`" title="CO2 趋势（ppm）" :option="co2Option" height="190px" />
+          <ChartPanel :key="`pm25-${currentClassroomId}`" title="PM2.5 趋势（ug/m3）" :option="pm25Option" height="190px" />
+          <ChartPanel :key="`noise-${currentClassroomId}`" title="噪声趋势（dB）" :option="noiseOption" height="190px" />
+          <ChartPanel :key="`heat-${currentClassroomId}`" title="人数热力图（按时间分布）" :option="heatmapOption" height="190px" />
+          <ChartPanel :key="`energy-${currentClassroomId}`" title="能耗趋势（kW）" :option="energyOption" height="190px" />
         </section>
 
         <section class="glass-card">
           <div class="panel-head">
             <div>
               <h3>历史数据记录</h3>
-              <p>最近监测采样点</p>
+              <p>{{ roomTitle }} 最近监测采样点</p>
             </div>
           </div>
           <div class="data-table">
@@ -80,17 +80,19 @@
               <el-table-column prop="room" label="教室" />
               <el-table-column prop="temperature" label="温度(℃)" />
               <el-table-column prop="humidity" label="湿度(%)" />
-              <el-table-column prop="co2" label="CO₂(ppm)" />
+              <el-table-column prop="co2" label="CO2(ppm)" />
               <el-table-column prop="pm25" label="PM2.5" />
               <el-table-column prop="noise" label="噪声(dB)" />
               <el-table-column prop="people_count" label="人数" />
               <el-table-column label="状态">
-                <template #default>
-                  <el-tag type="success" effect="dark" round>正常</el-tag>
+                <template #default="{ row }">
+                  <el-tag :type="row.co2 > 1000 || row.temperature > 30 || row.pm25 > 55 ? 'warning' : 'success'" effect="dark" round>
+                    {{ row.co2 > 1000 || row.temperature > 30 || row.pm25 > 55 ? '预警' : '正常' }}
+                  </el-tag>
                 </template>
               </el-table-column>
             </el-table>
-            <el-pagination small layout="prev, pager, next, sizes, jumper" :total="240" :page-size="10" />
+            <el-pagination small layout="prev, pager, next, sizes, jumper" :total="history.length" :page-size="10" />
           </div>
         </section>
       </div>
@@ -99,13 +101,13 @@
         <section class="glass-card">
           <div class="panel-head">
             <div>
-              <h3>异常时段（近7天）</h3>
-              <p>自动识别高风险区间</p>
+              <h3>异常时段（当前教室）</h3>
+              <p>{{ roomTitle }} 自动识别风险区间</p>
             </div>
           </div>
           <div class="mini-list">
-            <div v-for="item in abnormalPeriods" :key="item.time" class="mini-list-item">
-              <el-icon><Warning /></el-icon>
+            <div v-for="item in abnormalPeriods" :key="item.id || item.time" class="mini-list-item">
+              <el-icon><component :is="item.icon" /></el-icon>
               <div><strong>{{ item.time }}</strong><span>{{ item.type }} · {{ item.value }}</span></div>
             </div>
           </div>
@@ -135,45 +137,100 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, inject, onMounted, reactive, ref, watch } from 'vue'
 import { CircleCheck, Connection, Download, Refresh, Sunny, Timer, Warning } from '@element-plus/icons-vue'
 import ChartPanel from '../components/ChartPanel.vue'
-import { getHistoryData, getLatestClassroom } from '../api/request'
+import { getAlarmList, getHistoryData, getLatestClassroom } from '../api/request'
 
+const classroomOptions = [
+  { label: 'A205 教室', value: 'A205' },
+  { label: 'B101 教室', value: 'B101' },
+  { label: 'B102 教室', value: 'B102' },
+  { label: 'C301 教室', value: 'C301' }
+]
+
+const appNavigation = inject('appNavigation', null)
+const selectedClassroom = ref(appNavigation?.selectedClassroom?.value || 'A205')
 const filters = reactive({
-  classroom: 'A205',
-  building: 'A',
+  building: 'all',
   range: '',
   status: 'all'
 })
 
-const latest = ref({ temperature: 26.1, humidity: 62, co2: 980, pm25: 28, noise: 45, people_count: 46 })
+const latest = ref({ classroomId: selectedClassroom.value, classroomName: `${selectedClassroom.value} 教室`, temperature: 26.1, humidity: 62, co2: 980, pm25: 28, noise: 45, people_count: 46, peopleCount: 46, capacity: 80, energy: 8.5, devices: {} })
 const history = ref([])
+const alarms = ref([])
+const loading = ref(false)
 
-const abnormalPeriods = [
-  { time: '05-21 14:30 ~ 15:10', type: '高 CO₂', value: '1600 ppm' },
-  { time: '05-20 10:05 ~ 10:35', type: '高 PM2.5', value: '78 μg/m³' },
-  { time: '05-19 09:20 ~ 09:50', type: '高 噪声', value: '72 dB' },
-  { time: '05-18 16:45 ~ 17:15', type: '低 湿度', value: '38%' }
-]
+const currentClassroomId = computed(() => latest.value.classroomId || latest.value.classroom_id || selectedClassroom.value)
+const roomTitle = computed(() => latest.value.classroomName || latest.value.name || `${currentClassroomId.value} 教室`)
+const roomMeta = computed(() => `${latest.value.building || '-'} · ${latest.value.floor || '-'} · 面积 ${latest.value.area || '-'}㎡`)
+const peopleCount = computed(() => latest.value.peopleCount ?? latest.value.people_count ?? 0)
+const latestStatusText = computed(() => latest.value.status === 'warning' || latest.value.status === 'danger' ? '存在指标预警' : '运行稳定')
+const comfortText = computed(() => latest.value.status === 'warning' || latest.value.status === 'danger' ? '需关注' : '舒适')
+const environmentScore = computed(() => {
+  const penalties = [
+    Math.max(0, (Number(latest.value.co2 || 0) - 800) / 25),
+    Math.max(0, (Number(latest.value.temperature || 0) - 26) * 3),
+    Math.max(0, (Number(latest.value.pm25 || 0) - 35) / 2),
+    Math.max(0, (Number(latest.value.noise || 0) - 55) / 1.5)
+  ]
+  return Math.max(60, Math.round(96 - penalties.reduce((sum, value) => sum + value, 0)))
+})
 
-const suggestions = [
-  { title: '优化通风策略', text: 'CO₂ 低于 800 ppm 时降低新风量，可节能约 8%。', icon: Connection },
-  { title: '调整空调温度设定', text: '建议夏季设定 26-28℃，可节能约 12%。', icon: Sunny },
-  { title: '设备定时管理', text: '设置设备分时段启停，避免非使用时段耗能。', icon: Timer }
-]
+const deviceSummary = computed(() => {
+  const devices = Object.values(latest.value.devices || {})
+  if (!devices.length) return { online: 0, warning: 0, offline: 0 }
+  return devices.reduce((result, device) => {
+    if (device.online === false) result.offline += 1
+    else if (device.status) result.online += 1
+    else result.warning += 1
+    return result
+  }, { online: 0, warning: 0, offline: 0 })
+})
 
-const weeklyCompare = [
-  { name: '环境综合评分', current: '88分', change: '↑ 6分' },
-  { name: '能耗(kWh)', current: '412.6', change: '↓ 9.6%' },
-  { name: '异常次数', current: '8次', change: '↓ 46.7%' }
-]
+const abnormalPeriods = computed(() => {
+  if (!alarms.value.length) {
+    return [{ id: 'none', time: '暂无异常', type: roomTitle.value, value: '当前无报警', icon: CircleCheck }]
+  }
+  return alarms.value.slice(0, 4).map((item) => ({
+    ...item,
+    icon: Warning,
+    time: String(item.time || item.generatedAt || '').slice(5, 16),
+    type: item.type || '异常预警',
+    value: item.message || item.content || item.value || '请处理'
+  }))
+})
+
+const suggestions = computed(() => [
+  {
+    title: latest.value.co2 > 1000 ? '提高新风档位' : '保持低速新风',
+    text: latest.value.co2 > 1000 ? `当前 CO2 ${latest.value.co2} ppm，建议优先通风。` : '空气质量稳定，保持低速巡航可降低能耗。',
+    icon: Connection
+  },
+  {
+    title: latest.value.temperature > 28 ? '优化空调温度' : '维持空调策略',
+    text: latest.value.temperature > 28 ? '建议空调设为 26℃，温度稳定后切换节能模式。' : '当前温度舒适，避免频繁启停。',
+    icon: Sunny
+  },
+  {
+    title: '设备定时管理',
+    text: `${roomTitle.value} 下课后联动关闭多媒体、照明和空调，可减少空转能耗。`,
+    icon: Timer
+  }
+])
+
+const weeklyCompare = computed(() => [
+  { name: '环境综合评分', current: `${environmentScore.value}分`, change: latest.value.status === 'normal' ? '稳定' : '需关注' },
+  { name: '当前能耗(kW)', current: String(latest.value.energy ?? '-'), change: latest.value.energy > 10 ? '偏高' : '正常' },
+  { name: '当前报警数', current: `${alarms.value.length}次`, change: alarms.value.length ? '需处理' : '无异常' }
+])
 
 const tableRows = computed(() =>
-  history.value.slice(-8).reverse().map((item, index) => ({
+  history.value.slice(-8).reverse().map((item) => ({
     ...item,
-    room: 'A205',
-    time: `2025-05-23 ${item.time || `10:${String(index * 5).padStart(2, '0')}:00`}`
+    room: item.classroomName || item.classroomId || item.classroom_id || currentClassroomId.value,
+    time: item.updatedAt || item.update_time || item.time
   }))
 )
 
@@ -190,8 +247,8 @@ const tempHumidityOption = computed(() => ({
   ]
 }))
 
-const co2Option = computed(() => singleLineOption('CO₂', history.value.map((item) => item.co2), '#31e98f', 'ppm'))
-const pm25Option = computed(() => singleLineOption('PM2.5', history.value.map((item) => item.pm25), '#ffbf2f', 'μg/m³'))
+const co2Option = computed(() => singleLineOption('CO2', history.value.map((item) => item.co2), '#31e98f', 'ppm'))
+const pm25Option = computed(() => singleLineOption('PM2.5', history.value.map((item) => item.pm25), '#ffbf2f', 'ug/m3'))
 const noiseOption = computed(() => singleLineOption('噪声', history.value.map((item) => item.noise), '#925cff', 'dB'))
 
 const heatmapOption = computed(() => {
@@ -200,7 +257,8 @@ const heatmapOption = computed(() => {
   const data = []
   days.forEach((_, dayIndex) => {
     hours.forEach((_, hourIndex) => {
-      data.push([hourIndex, dayIndex, Math.round(Math.max(0, 88 - Math.abs(hourIndex - 6) * 12 - Math.abs(dayIndex - 2) * 8))])
+      const sample = history.value[(dayIndex * 13 + hourIndex) % Math.max(1, history.value.length)]
+      data.push([hourIndex, dayIndex, Number(sample?.peopleCount || sample?.people_count || 0)])
     })
   })
   return {
@@ -208,17 +266,15 @@ const heatmapOption = computed(() => {
     grid: { left: 42, right: 18, top: 16, bottom: 32 },
     xAxis: { type: 'category', data: hours, axisLabel: { color: '#9fc2df' } },
     yAxis: { type: 'category', data: days, axisLabel: { color: '#9fc2df' } },
-    visualMap: { min: 0, max: 100, right: 0, top: 'middle', textStyle: { color: '#9fc2df' }, inRange: { color: ['#0b376f', '#1bd4d0', '#f6e95b'] } },
+    visualMap: { min: 0, max: latest.value.capacity || 100, right: 0, top: 'middle', textStyle: { color: '#9fc2df' }, inRange: { color: ['#0b376f', '#1bd4d0', '#f6e95b'] } },
     series: [{ type: 'heatmap', data }]
   }
 })
 
 const energyOption = computed(() => ({
-  ...baseOption(['周一', '周二', '周三', '周四', '周五', '周六', '周日']),
-  legend: { top: 0, textStyle: { color: '#a9c9e8' } },
+  ...baseOption(history.value.slice(-24).map((item) => item.time)),
   series: [
-    { name: '本周', type: 'bar', data: [72, 80, 61, 76, 68, 31, 21], itemStyle: { color: '#147cff' } },
-    { name: '上周', type: 'bar', data: [66, 78, 55, 62, 57, 28, 17], itemStyle: { color: 'rgba(180,210,255,.38)' } }
+    { name: '能耗', type: 'bar', data: history.value.slice(-24).map((item) => item.energy), itemStyle: { color: '#147cff' } }
   ]
 }))
 
@@ -251,9 +307,33 @@ function seatStyle(index) {
 }
 
 async function loadData() {
-  const [latestData, historyData] = await Promise.all([getLatestClassroom(), getHistoryData()])
-  latest.value = latestData
-  history.value = historyData
+  loading.value = true
+  try {
+    const id = selectedClassroom.value
+    const [latestData, historyData, alarmData] = await Promise.all([
+      getLatestClassroom(id),
+      getHistoryData(id),
+      getAlarmList(id)
+    ])
+    latest.value = latestData
+    history.value = historyData
+    alarms.value = alarmData
+  } finally {
+    loading.value = false
+  }
+}
+
+watch(selectedClassroom, (value) => {
+  if (appNavigation?.selectedClassroom && appNavigation.selectedClassroom.value !== value) {
+    appNavigation.selectedClassroom.value = value
+  }
+  loadData()
+})
+
+if (appNavigation?.selectedClassroom) {
+  watch(appNavigation.selectedClassroom, (value) => {
+    if (value && value !== selectedClassroom.value) selectedClassroom.value = value
+  })
 }
 
 onMounted(loadData)

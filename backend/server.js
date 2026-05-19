@@ -61,26 +61,29 @@ app.get('/api/ai/health', (req, res) => {
 })
 
 app.get('/api/classroom/latest', (req, res) => {
+  const classroomId = resolveClassroomIdFromRequest(req)
   sendJson(res, {
     code: 200,
     message: 'success',
-    data: getLatestClassroom()
+    data: getLatestClassroom(classroomId)
   })
 })
 
 app.get('/api/classroom/history', (req, res) => {
+  const classroomId = resolveClassroomIdFromRequest(req)
   sendJson(res, {
     code: 200,
     message: 'success',
-    data: getHistoryData(req.query.limit)
+    data: getHistoryData(req.query.limit, classroomId)
   })
 })
 
 app.get('/api/alarm/list', (req, res) => {
+  const classroomId = resolveClassroomIdFromRequest(req)
   sendJson(res, {
     code: 200,
     message: 'success',
-    data: getAlarmList()
+    data: getAlarmList(classroomId)
   })
 })
 
@@ -93,17 +96,18 @@ app.post('/api/device/control', (req, res) => {
 })
 
 app.post('/api/ai/analyze', async (req, res) => {
-  const context = buildAnalysisContext()
-  const simulationTime = getSimulationTime()
-  const analysisTime = context.classroomState?.updatedAt || context.classroomState?.update_time || simulationTime.updatedAt
-  const classroom = normalizeClassroomPayload(req.body?.classroomData || req.body?.classroomState ? req.body : context.classroomState)
+  const classroomId = resolveClassroomIdFromRequest(req)
+  const context = buildAnalysisContext(classroomId)
+  const simulationTime = getSimulationTime(classroomId)
+  const analysisTime = context.classroomState?.updatedAt || context.classroomState?.update_time || simulationTime
+  const classroom = normalizeClassroomPayload(req.body?.classroomData || req.body?.classroomState ? { ...req.body, classroomId } : context.classroomState)
   const config = resolveLlmConfig()
 
   if (!config.apiKey) {
     return sendJson(res, {
       code: 200,
       message: 'success',
-      data: buildMockData(classroom, context, '缺少 DeepSeek API Key，已启用本地 AI 模拟分析')
+      data: buildMockData(classroom, context, '缺少 DeepSeek API Key，已启用本地 AI 模拟分析', analysisTime)
     })
   }
 
@@ -127,7 +131,7 @@ app.post('/api/ai/analyze', async (req, res) => {
     return sendJson(res, {
       code: 200,
       message: 'success',
-      data: buildMockData(classroom, context, readableError(error))
+      data: buildMockData(classroom, context, readableError(error), analysisTime)
     })
   }
 })
@@ -188,20 +192,43 @@ function loadEnvFile(filePath) {
   })
 }
 
+function resolveClassroomIdFromRequest(req) {
+  return req.query?.classroomId
+    || req.query?.classroom_id
+    || req.body?.classroomId
+    || req.body?.classroom_id
+    || req.body?.room
+    || req.body?.classroomData?.classroomId
+    || req.body?.classroomData?.classroom_id
+    || req.body?.classroomData?.room
+    || req.body?.classroomState?.classroomId
+    || req.body?.classroomState?.classroom_id
+    || req.body?.classroomState?.room
+    || 'A205'
+}
+
 function normalizeClassroomPayload(body = {}) {
   const classroomData = body.classroomData || body.classroom || body.metrics || body
   const devices = classroomData.devices || body.devices || {}
-  const room = classroomData.room || classroomData.classroom_id || classroomData.classroomId || body.room || body.classroom_id || 'A205'
+  const room = classroomData.classroomId || classroomData.classroom_id || classroomData.room || body.classroomId || body.classroom_id || body.room || 'A205'
 
   return {
+    classroomId: String(room),
     classroom_id: String(room),
     room: String(room),
+    classroomName: classroomData.classroomName || classroomData.name || `${room} 教室`,
+    building: classroomData.building || '',
+    floor: classroomData.floor || '',
+    area: numberOrDefault(classroomData.area, 0),
+    capacity: numberOrDefault(classroomData.capacity, 0),
     temperature: numberOrDefault(classroomData.temperature, 28.6),
     humidity: numberOrDefault(classroomData.humidity, 68),
     co2: numberOrDefault(classroomData.co2 ?? classroomData.CO2 ?? classroomData['co₂'], 1450),
     pm25: numberOrDefault(classroomData.pm25 ?? classroomData['pm2.5'], 42),
     noise: numberOrDefault(classroomData.noise, 56),
     people_count: numberOrDefault(classroomData.people_count ?? classroomData.peopleCount ?? classroomData.people, 48),
+    light: numberOrDefault(classroomData.light, 0),
+    energy: numberOrDefault(classroomData.energy, 0),
     light_status: devices.light_status || devices.light || classroomData.light_status || classroomData.lightStatus || 'on',
     ac_status: devices.ac_status || devices.ac || classroomData.ac_status || classroomData.acStatus || 'on',
     ventilation_status: devices.ventilation_status || devices.ventilation || classroomData.ventilation_status || classroomData.ventilationStatus || 'off',

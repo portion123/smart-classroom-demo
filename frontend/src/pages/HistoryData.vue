@@ -3,8 +3,7 @@
     <section class="filter-bar">
       <span class="filter-label">教室选择</span>
       <el-select v-model="filters.classroom" style="width: 170px">
-        <el-option label="A205 教室" value="A205" />
-        <el-option label="B101 教室" value="B101" />
+        <el-option v-for="item in classroomOptions" :key="item.value" :label="item.label" :value="item.value" />
       </el-select>
       <span class="filter-label">时间范围</span>
       <el-date-picker v-model="filters.range" type="daterange" start-placeholder="开始日期" end-placeholder="结束日期" style="width: 300px" />
@@ -24,11 +23,11 @@
 
         <section class="history-chart-grid">
           <ChartPanel title="温湿度历史曲线" :option="tempHumidityOption" height="190px" />
-          <ChartPanel title="CO₂历史曲线（ppm）" :option="co2Option" height="190px" />
-          <ChartPanel title="PM2.5历史曲线（μg/m³）" :option="pm25Option" height="190px" />
+          <ChartPanel title="CO2 历史曲线（ppm）" :option="co2Option" height="190px" />
+          <ChartPanel title="PM2.5 历史曲线（ug/m3）" :option="pm25Option" height="190px" />
           <ChartPanel title="噪声历史曲线（dB）" :option="noiseOption" height="190px" />
           <ChartPanel title="人数历史曲线（人）" :option="peopleOption" height="190px" />
-          <ChartPanel title="能耗历史曲线（kWh）" :option="energyOption" height="190px" />
+          <ChartPanel title="能耗历史曲线（kW）" :option="energyOption" height="190px" />
           <ChartPanel class="wide-chart" title="教室使用强度热力图（小时分布）" :option="heatmapOption" height="190px" />
         </section>
 
@@ -36,27 +35,29 @@
           <div class="panel-head">
             <div>
               <h3>历史数据记录</h3>
-              <p>共 6,720 条</p>
+              <p>{{ roomTitle }} 最近 {{ history.length }} 条采样</p>
             </div>
           </div>
           <div class="data-table">
             <el-table :data="tableRows" height="220" size="small">
-              <el-table-column prop="time" label="时间" />
+              <el-table-column prop="time" label="时间" min-width="154" />
               <el-table-column prop="temperature" label="温度(℃)" />
               <el-table-column prop="humidity" label="湿度(%)" />
-              <el-table-column prop="co2" label="CO₂(ppm)" />
+              <el-table-column prop="co2" label="CO2(ppm)" />
               <el-table-column prop="light" label="光照(lux)" />
-              <el-table-column prop="pm25" label="PM2.5(μg/m³)" />
+              <el-table-column prop="pm25" label="PM2.5" />
               <el-table-column prop="noise" label="噪声(dB)" />
-              <el-table-column prop="people_count" label="人数(人)" />
-              <el-table-column prop="energy" label="能耗(kWh)" />
+              <el-table-column prop="people_count" label="人数" />
+              <el-table-column prop="energy" label="能耗(kW)" />
               <el-table-column label="状态">
-                <template #default>
-                  <el-tag type="success" effect="dark" round>正常</el-tag>
+                <template #default="{ row }">
+                  <el-tag :type="row.co2 > 1000 || row.temperature > 30 || row.pm25 > 55 ? 'warning' : 'success'" effect="dark" round>
+                    {{ row.co2 > 1000 || row.temperature > 30 || row.pm25 > 55 ? '预警' : '正常' }}
+                  </el-tag>
                 </template>
               </el-table-column>
             </el-table>
-            <el-pagination small layout="total, prev, pager, next, sizes, jumper" :total="6720" :page-size="15" />
+            <el-pagination small layout="total, prev, pager, next, sizes, jumper" :total="history.length" :page-size="15" />
           </div>
         </section>
       </div>
@@ -64,12 +65,12 @@
       <aside class="history-side">
         <section class="glass-card room-info">
           <div class="side-room-photo"></div>
-          <h2>A205 教室</h2>
-          <p>教学楼A栋 · 2F</p>
+          <h2>{{ roomTitle }}</h2>
+          <p>{{ latest.building || '-' }} · {{ latest.floor || '-' }}</p>
           <ul>
-            <li>容纳人数：50人</li>
-            <li>面积：86㎡</li>
-            <li>设备数量：18台</li>
+            <li>容纳人数：{{ latest.capacity || '-' }} 人</li>
+            <li>面积：{{ latest.area || '-' }} ㎡</li>
+            <li>当前人数：{{ peopleCount }} 人</li>
           </ul>
           <el-button class="primary-gradient" @click="openDeviceDetail">查看设备详情</el-button>
         </section>
@@ -96,9 +97,9 @@
         <section class="glass-card">
           <div class="panel-head"><h3>节能分析</h3></div>
           <div class="mini-list">
-            <div class="mini-list-item"><el-icon><Connection /></el-icon><div><strong>能耗环比下降</strong><span>本周总能耗 412.6 kWh，较上周下降 9.6%。</span></div></div>
-            <div class="mini-list-item"><el-icon><Timer /></el-icon><div><strong>最佳节能时段</strong><span>每日 12:00-14:00 可重点优化设备运行策略。</span></div></div>
-            <div class="mini-list-item"><el-icon><Sunny /></el-icon><div><strong>节能建议</strong><span>非使用时段自动降低空调设定与照明亮度。</span></div></div>
+            <div class="mini-list-item"><el-icon><Connection /></el-icon><div><strong>能耗动态跟随</strong><span>{{ roomTitle }} 的能耗曲线已按当前教室重新生成。</span></div></div>
+            <div class="mini-list-item"><el-icon><Timer /></el-icon><div><strong>最佳节能时段</strong><span>人数低谷时段自动降低新风和照明档位。</span></div></div>
+            <div class="mini-list-item"><el-icon><Sunny /></el-icon><div><strong>节能建议</strong><span>课后联动关闭空调、多媒体和照明设备。</span></div></div>
           </div>
         </section>
       </aside>
@@ -107,46 +108,59 @@
 </template>
 
 <script setup>
-import { computed, inject, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { computed, inject, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Connection, Histogram, Monitor, Sunny, Timer, TrendCharts, UserFilled } from '@element-plus/icons-vue'
 import ChartPanel from '../components/ChartPanel.vue'
 import StatCard from '../components/StatCard.vue'
-import { getHistoryData } from '../api/request'
+import { getHistoryData, getLatestClassroom } from '../api/request'
 
-const filters = reactive({ classroom: 'A205', range: '', granularity: '15m' })
-const history = ref([])
+const classroomOptions = [
+  { label: 'A205 教室', value: 'A205' },
+  { label: 'B101 教室', value: 'B101' },
+  { label: 'B102 教室', value: 'B102' },
+  { label: 'C301 教室', value: 'C301' }
+]
+
 const appNavigation = inject('appNavigation', null)
+const filters = reactive({ classroom: appNavigation?.selectedClassroom?.value || 'A205', range: '', granularity: '15m' })
+const latest = ref({ classroomId: filters.classroom, classroomName: `${filters.classroom} 教室`, capacity: 0, area: 0, people_count: 0 })
+const history = ref([])
 let historyTimer = null
 
+const currentClassroomId = computed(() => latest.value.classroomId || latest.value.classroom_id || filters.classroom)
+const roomTitle = computed(() => latest.value.classroomName || latest.value.name || `${currentClassroomId.value} 教室`)
+const peopleCount = computed(() => latest.value.peopleCount ?? latest.value.people_count ?? 0)
+
 const stats = computed(() => [
-  { icon: TrendCharts, label: '历史平均温度', value: average('temperature'), unit: '℃', status: 'normal', trend: '较上周 -0.6℃', tone: 'green' },
-  { icon: Connection, label: '历史平均湿度', value: average('humidity'), unit: '%', status: 'normal', trend: '较上周 +2.3%', tone: 'blue' },
-  { icon: Monitor, label: '历史平均 CO₂', value: average('co2'), unit: 'ppm', status: 'warning', trend: '较上周 -124 ppm', tone: 'red' },
-  { icon: Histogram, label: '历史平均 PM2.5', value: average('pm25'), unit: 'μg/m³', status: 'normal', trend: '较上周 -6 μg/m³', tone: 'orange' },
-  { icon: UserFilled, label: '历史平均人数', value: average('people_count'), unit: '人', status: 'normal', trend: '较上周 +4人', tone: 'purple' }
+  { icon: TrendCharts, label: '历史平均温度', value: average('temperature'), unit: '℃', status: 'normal', trend: '动态模拟', tone: 'green' },
+  { icon: Connection, label: '历史平均湿度', value: average('humidity'), unit: '%', status: 'normal', trend: '动态模拟', tone: 'blue' },
+  { icon: Monitor, label: '历史平均 CO2', value: average('co2'), unit: 'ppm', status: average('co2') > 1000 ? 'warning' : 'normal', trend: '当前教室', tone: 'red' },
+  { icon: Histogram, label: '历史平均 PM2.5', value: average('pm25'), unit: 'ug/m3', status: average('pm25') > 55 ? 'warning' : 'normal', trend: '当前教室', tone: 'orange' },
+  { icon: UserFilled, label: '历史平均人数', value: average('people_count'), unit: '人', status: 'normal', trend: '当前教室', tone: 'purple' }
 ])
 
 const tableRows = computed(() =>
   history.value.slice(-9).reverse().map((item, index) => ({
     ...item,
+    people_count: item.peopleCount ?? item.people_count ?? 0,
     time: item.generatedAt || item.currentTime || item.updatedAt || item.update_time || item.time || `--:${String(index * 5).padStart(2, '0')}:00`
   }))
 )
 
-const summary = [
-  { title: '温度整体稳定', text: '过去7天平均温度 26.4℃，波动范围 22.1-30.2℃。', icon: TrendCharts },
-  { title: 'CO₂整体改善', text: '平均 CO₂ 为 1056 ppm，较上周下降 124 ppm。', icon: Monitor },
-  { title: '人数略有上升', text: '平均人数 38 人，使用率增加 10.5%。', icon: UserFilled }
-]
+const summary = computed(() => [
+  { title: '温度整体稳定', text: `${roomTitle.value} 平均温度 ${average('temperature')}℃。`, icon: TrendCharts },
+  { title: 'CO2 趋势跟随人数', text: `平均 CO2 ${average('co2')} ppm，最后点接近当前时间。`, icon: Monitor },
+  { title: '使用强度已切换', text: `当前显示 ${roomTitle.value} 的历史曲线。`, icon: UserFilled }
+])
 
-const compare = [
-  { name: '温度(℃)', current: '26.4', change: '-0.6 ↓' },
-  { name: '湿度(%)', current: '58.7', change: '+2.3 ↑' },
-  { name: 'CO₂(ppm)', current: '1056', change: '-124 ↓' },
-  { name: 'PM2.5', current: '38', change: '-6 ↓' },
-  { name: '能耗(kWh)', current: '412.6', change: '-43.7 ↓' }
-]
+const compare = computed(() => [
+  { name: '温度(℃)', current: String(average('temperature')), change: '动态' },
+  { name: '湿度(%)', current: String(average('humidity')), change: '动态' },
+  { name: 'CO2(ppm)', current: String(average('co2')), change: '动态' },
+  { name: 'PM2.5', current: String(average('pm25')), change: '动态' },
+  { name: '能耗(kW)', current: String(average('energy')), change: '动态' }
+])
 
 const tempHumidityOption = computed(() => ({
   ...baseOption(labels.value),
@@ -157,22 +171,24 @@ const tempHumidityOption = computed(() => ({
     { ...line('湿度(%)', values('humidity'), '#147cff'), yAxisIndex: 1 }
   ]
 }))
-const co2Option = computed(() => singleLine('CO₂', 'co2', '#ff4d5f', 'ppm'))
-const pm25Option = computed(() => singleLine('PM2.5', 'pm25', '#ffbf2f', 'μg/m³'))
+const co2Option = computed(() => singleLine('CO2', 'co2', '#ff4d5f', 'ppm'))
+const pm25Option = computed(() => singleLine('PM2.5', 'pm25', '#ffbf2f', 'ug/m3'))
 const noiseOption = computed(() => singleLine('噪声', 'noise', '#20d8ff', 'dB'))
 const peopleOption = computed(() => singleLine('人数', 'people_count', '#925cff', '人'))
-const energyOption = computed(() => singleLine('能耗', 'energy', '#20d8ff', 'kWh'))
+const energyOption = computed(() => singleLine('能耗', 'energy', '#20d8ff', 'kW'))
 const heatmapOption = computed(() => heatmap())
-const labels = computed(() => history.value.map((item) => item.date || item.time).slice(-28))
+const labels = computed(() => history.value.map((item) => item.time).slice(-28))
 
 function average(key) {
   const list = history.value.length ? history.value : []
   if (!list.length) return '--'
-  return Number((list.reduce((sum, item) => sum + Number(item[key] || 0), 0) / list.length).toFixed(key === 'temperature' || key === 'humidity' ? 1 : 0))
+  const valuesForKey = list.map((item) => Number(key === 'people_count' ? item.peopleCount ?? item.people_count : item[key])).filter(Number.isFinite)
+  if (!valuesForKey.length) return '--'
+  return Number((valuesForKey.reduce((sum, item) => sum + item, 0) / valuesForKey.length).toFixed(key === 'temperature' || key === 'humidity' || key === 'energy' ? 1 : 0))
 }
 
 function values(key) {
-  return history.value.map((item) => item[key]).slice(-28)
+  return history.value.map((item) => key === 'people_count' ? item.peopleCount ?? item.people_count : item[key]).slice(-28)
 }
 
 function baseOption(xData) {
@@ -201,27 +217,44 @@ function heatmap() {
   const hours = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'))
   const data = []
   days.forEach((_, day) => {
-    hours.forEach((_, hour) => data.push([hour, day, Math.max(0, Math.round(98 - Math.abs(hour - 14) * 7 - Math.abs(day - 3) * 9))]))
+    hours.forEach((_, hour) => {
+      const sample = history.value[(day * 24 + hour) % Math.max(1, history.value.length)]
+      data.push([hour, day, Number(sample?.peopleCount ?? sample?.people_count ?? 0)])
+    })
   })
   return {
     tooltip: { position: 'top' },
     grid: { left: 42, right: 58, top: 18, bottom: 26 },
     xAxis: { type: 'category', data: hours, axisLabel: { color: '#9fc2df' } },
     yAxis: { type: 'category', data: days, axisLabel: { color: '#9fc2df' } },
-    visualMap: { min: 0, max: 100, right: 6, top: 'middle', textStyle: { color: '#9fc2df' }, inRange: { color: ['#0b376f', '#28d4b5', '#ffd44a', '#ff5d5d'] } },
+    visualMap: { min: 0, max: latest.value.capacity || 100, right: 6, top: 'middle', textStyle: { color: '#9fc2df' }, inRange: { color: ['#0b376f', '#28d4b5', '#ffd44a', '#ff5d5d'] } },
     series: [{ type: 'heatmap', data }]
   }
 }
 
 function openDeviceDetail() {
-  filters.classroom = 'A205'
-  appNavigation?.navigateToPage?.('device', { classroom: 'A205' })
-  ElMessage.success('已切换到 A205 教室设备详情')
+  appNavigation?.navigateToPage?.('device', { classroom: filters.classroom })
+  ElMessage.success(`已切换到 ${roomTitle.value} 设备详情`)
 }
 
 async function refreshHistory() {
-  const data = await getHistoryData()
-  history.value = Array.isArray(data) ? data : []
+  const id = filters.classroom
+  const [latestData, historyData] = await Promise.all([getLatestClassroom(id), getHistoryData(id)])
+  latest.value = latestData
+  history.value = Array.isArray(historyData) ? historyData : []
+}
+
+watch(() => filters.classroom, (value) => {
+  if (appNavigation?.selectedClassroom && appNavigation.selectedClassroom.value !== value) {
+    appNavigation.selectedClassroom.value = value
+  }
+  refreshHistory()
+})
+
+if (appNavigation?.selectedClassroom) {
+  watch(appNavigation.selectedClassroom, (value) => {
+    if (value && value !== filters.classroom) filters.classroom = value
+  })
 }
 
 onMounted(async () => {

@@ -1,470 +1,556 @@
-const HISTORY_LIMIT = 160
-const ALARM_LIMIT = 80
-const TICK_SECONDS = 3
-const TICK_MS = TICK_SECONDS * 1000
-const SIM_TIMEZONE = 'Asia/Shanghai'
-const HISTORY_SYNC_TOLERANCE_MS = 1500
+const DEFAULT_CLASSROOM_ID = 'A205'
 
-export const classroomState = {
-  classroomId: 'A205',
-  temperature: 27.2,
-  humidity: 61.5,
-  co2: 920,
-  light: 720,
-  peopleCount: 42,
-  energy: 12.8,
-  pm25: 32,
-  noise: 51,
-  devices: {
-    light: { on: true, online: true, brightness: 80 },
-    airConditioner: { on: true, online: true, targetTemperature: 26, mode: 'cool' },
-    freshAir: { on: true, online: true, speed: 'mid' },
-    curtain: { on: true, online: true, opening: 60 },
-    multimedia: { on: true, online: true, volume: 58 }
+const clamp = (value, min, max) => Math.min(max, Math.max(min, value))
+const round = (value, digits = 1) => Number(value.toFixed(digits))
+const clone = (value) => JSON.parse(JSON.stringify(value))
+
+const nowIso = () => new Date().toISOString()
+
+const deviceTemplate = {
+  light: { name: '灯光', status: true, power: 1.8, online: true },
+  airConditioner: { name: '空调', status: true, power: 3.6, mode: 'cool', temperature: 24, online: true },
+  freshAir: { name: '新风', status: true, power: 1.2, online: true },
+  curtain: { name: '窗帘', status: false, position: 45, online: true },
+  multimedia: { name: '多媒体', status: true, power: 0.9, online: true }
+}
+
+const classroomProfiles = {
+  A205: {
+    classroomId: 'A205',
+    classroomName: 'A205 教室',
+    name: 'A205 教室',
+    building: '教学楼 A 栋',
+    floor: '2F',
+    area: 86,
+    capacity: 80,
+    phase: 0.2,
+    peopleBase: 42,
+    peopleSwing: 7,
+    nightPeople: 4,
+    temperatureBase: 27.2,
+    humidityBase: 56,
+    co2Base: 860,
+    co2Bias: 170,
+    pm25Base: 22,
+    noiseBase: 52,
+    lightBase: 520,
+    energyBase: 8.4,
+    energyAlarm: 12,
+    devices: clone(deviceTemplate)
   },
-  currentTime: '',
-  updatedAt: '',
-  generatedAt: ''
-}
-
-const historyData = []
-const alarmRecords = []
-let lastTickAt = Date.now()
-let lastHistoryAt = 0
-syncStateTime(lastTickAt)
-
-seedHistory()
-
-export function getLatestClassroom() {
-  advanceSimulation()
-  return serializeState()
-}
-
-export function getHistoryData(limit = 72) {
-  advanceSimulation()
-  ensureHistorySynced()
-  return historyData.slice(-Number(limit || 72))
-}
-
-export function getAlarmList() {
-  advanceSimulation()
-  appendCurrentAlarms()
-  return alarmRecords.slice(0, ALARM_LIMIT)
-}
-
-export function controlDevice(payload = {}) {
-  advanceSimulation()
-  const key = normalizeDeviceKey(payload.device)
-  if (!key || !classroomState.devices[key]) {
-    return {
-      mode: 'mock',
-      classroom_id: classroomState.classroomId,
-      message: `unsupported device: ${payload.device || ''}`,
-      latest: serializeState()
+  B101: {
+    classroomId: 'B101',
+    classroomName: 'B101 教室',
+    name: 'B101 教室',
+    building: '教学楼 B 栋',
+    floor: '1F',
+    area: 78,
+    capacity: 72,
+    phase: 1.5,
+    peopleBase: 38,
+    peopleSwing: 5,
+    nightPeople: 3,
+    temperatureBase: 25.1,
+    humidityBase: 52,
+    co2Base: 690,
+    co2Bias: 25,
+    pm25Base: 18,
+    noiseBase: 47,
+    lightBase: 560,
+    energyBase: 6.9,
+    energyAlarm: 11,
+    devices: {
+      ...clone(deviceTemplate),
+      curtain: { name: '窗帘', status: true, position: 70, online: true }
+    }
+  },
+  B102: {
+    classroomId: 'B102',
+    classroomName: 'B102 教室',
+    name: 'B102 教室',
+    building: '教学楼 B 栋',
+    floor: '1F',
+    area: 64,
+    capacity: 54,
+    phase: 2.6,
+    peopleBase: 20,
+    peopleSwing: 4,
+    nightPeople: 1,
+    temperatureBase: 24.4,
+    humidityBase: 50,
+    co2Base: 560,
+    co2Bias: -20,
+    pm25Base: 15,
+    noiseBase: 42,
+    lightBase: 460,
+    energyBase: 4.5,
+    energyAlarm: 8.5,
+    devices: {
+      ...clone(deviceTemplate),
+      airConditioner: { name: '空调', status: false, power: 3.2, mode: 'cool', temperature: 25, online: true },
+      multimedia: { name: '多媒体', status: false, power: 0.8, online: true }
+    }
+  },
+  C301: {
+    classroomId: 'C301',
+    classroomName: 'C301 教室',
+    name: 'C301 教室',
+    building: '综合楼 C 栋',
+    floor: '3F',
+    area: 96,
+    capacity: 90,
+    phase: 3.9,
+    peopleBase: 48,
+    peopleSwing: 8,
+    nightPeople: 5,
+    temperatureBase: 26.2,
+    humidityBase: 58,
+    co2Base: 780,
+    co2Bias: 80,
+    pm25Base: 48,
+    noiseBase: 61,
+    lightBase: 500,
+    energyBase: 9.2,
+    energyAlarm: 12.8,
+    devices: {
+      ...clone(deviceTemplate),
+      freshAir: { name: '新风', status: true, power: 1.4, online: true },
+      multimedia: { name: '多媒体', status: true, power: 1.1, online: false }
     }
   }
+}
 
-  const device = classroomState.devices[key]
-  const action = String(payload.action || '').toLowerCase()
-  if (action === 'offline') device.online = false
-  if (action === 'online') device.online = true
-  if (action === 'on') {
-    device.on = true
-    device.online = true
-  }
-  if (action === 'off') device.on = false
+const runtimeMap = new Map()
 
-  applyDevicePayload(key, device, payload)
-  syncStateTime(lastTickAt)
-  appendHistoryPoint(lastTickAt)
-  appendCurrentAlarms()
+const normalizeClassroomId = (classroomId = DEFAULT_CLASSROOM_ID) => {
+  const normalized = String(classroomId || DEFAULT_CLASSROOM_ID).trim().toUpperCase()
+  return classroomProfiles[normalized] ? normalized : DEFAULT_CLASSROOM_ID
+}
+
+const getProfile = (classroomId) => classroomProfiles[normalizeClassroomId(classroomId)]
+
+const computeDeviceEnergy = (devices) => Object.values(devices).reduce((sum, device) => {
+  if (!device.status || device.online === false) return sum
+  return sum + Number(device.power || 0)
+}, 0)
+
+const createInitialState = (profile, timestamp = Date.now()) => {
+  const generatedAt = new Date(timestamp).toISOString()
+  const devices = clone(profile.devices)
 
   return {
-    classroom_id: classroomState.classroomId,
-    classroomId: classroomState.classroomId,
-    device: payload.device,
-    normalizedDevice: key,
-    action,
-    latest: serializeState(),
-    ...deviceStatuses()
+    classroomId: profile.classroomId,
+    classroom_id: profile.classroomId,
+    classroomName: profile.classroomName,
+    name: profile.name,
+    building: profile.building,
+    floor: profile.floor,
+    area: profile.area,
+    capacity: profile.capacity,
+    temperature: round(profile.temperatureBase),
+    humidity: round(profile.humidityBase),
+    co2: Math.round(profile.co2Base + profile.co2Bias),
+    pm25: round(profile.pm25Base),
+    noise: round(profile.noiseBase),
+    light: Math.round(profile.lightBase),
+    peopleCount: profile.peopleBase,
+    energy: round(profile.energyBase + computeDeviceEnergy(devices)),
+    devices,
+    currentTime: generatedAt,
+    updatedAt: generatedAt,
+    generatedAt,
+    update_time: generatedAt,
+    status: 'normal'
   }
 }
 
-export function buildAnalysisContext() {
-  advanceSimulation()
-  appendCurrentAlarms()
+const serializeState = (runtime) => {
+  const state = runtime.state
   return {
-    classroomState: serializeState(),
-    history: getHistoryData(36),
-    alarms: alarmRecords.slice(0, 12)
+    ...clone(state),
+    classroom_id: state.classroomId,
+    classroomName: state.classroomName || state.name,
+    light_status: state.devices.light?.status ? 1 : 0,
+    ac_status: state.devices.airConditioner?.status ? 1 : 0,
+    ventilation_status: state.devices.freshAir?.status ? 1 : 0,
+    curtain_status: state.devices.curtain?.status ? 1 : 0,
+    multimedia_status: state.devices.multimedia?.status ? 1 : 0
   }
 }
 
-function advanceSimulation() {
-  const now = Date.now()
-  const elapsed = now - lastTickAt
-  const steps = Math.min(10, Math.floor(elapsed / TICK_MS))
-  if (steps <= 0) {
-    syncStateTime(lastTickAt)
-    return
-  }
+const createHistoryPoint = (runtime, timestampMs) => {
+  const state = runtime.state
+  const timestamp = new Date(timestampMs).toISOString()
 
-  for (let index = 0; index < steps; index += 1) {
-    lastTickAt += TICK_MS
-    simulateStep(lastTickAt)
-    syncStateTime(lastTickAt)
-  }
-  if (now - lastHistoryAt >= 5000) appendHistoryPoint(lastTickAt)
-}
-
-function simulateStep(tickMs) {
-  const now = new Date(tickMs)
-  const hour = getHourInTimezone(now, SIM_TIMEZONE)
-  const activeScore = hour >= 8 && hour <= 21 ? 1 : 0.2
-  const classWave = Math.sin(tickMs / 1000 / 95)
-  const peopleTarget = activeScore ? 38 + classWave * 9 + smoothNoise(3) : 9 + smoothNoise(2)
-
-  classroomState.peopleCount = Math.round(approach(classroomState.peopleCount, peopleTarget, 0.08, 3, 60))
-
-  const ac = classroomState.devices.airConditioner
-  const freshAir = classroomState.devices.freshAir
-  const light = classroomState.devices.light
-  const curtain = classroomState.devices.curtain
-  const multimedia = classroomState.devices.multimedia
-
-  const ambientTemperature = 27.5 + Math.sin(tickMs / 1000 / 180) * 1.7 + classroomState.peopleCount * 0.025
-  const temperatureTarget = ac.on && ac.online ? ac.targetTemperature : ambientTemperature + (light.on ? 0.25 : 0)
-  classroomState.temperature = round1(approach(classroomState.temperature, temperatureTarget, ac.on && ac.online ? 0.13 : 0.045, 22, 33.5))
-
-  const humidityTarget = 58 + Math.cos(tickMs / 1000 / 150) * 6 + (freshAir.on && freshAir.online ? -2.5 : 3)
-  classroomState.humidity = round1(approach(classroomState.humidity, humidityTarget, 0.055, 38, 82))
-
-  const co2Target = 520 + classroomState.peopleCount * 13 + (freshAir.on && freshAir.online ? -160 : 330)
-  classroomState.co2 = Math.round(approach(classroomState.co2, co2Target, freshAir.on && freshAir.online ? 0.18 : 0.075, 430, 1900))
-
-  const lightTarget = (light.on && light.online ? light.brightness * 9 : 80) + (curtain.online ? curtain.opening * 2.4 : 0)
-  classroomState.light = Math.round(approach(classroomState.light, lightTarget, 0.16, 40, 1150))
-
-  const pm25Target = 28 + (freshAir.on && freshAir.online ? -4 : 12) + Math.max(classroomState.peopleCount - 42, 0) * 0.22
-  classroomState.pm25 = Math.round(approach(classroomState.pm25, pm25Target, 0.07, 12, 95))
-
-  const noiseTarget = 37 + classroomState.peopleCount * 0.38 + (multimedia.on && multimedia.online ? multimedia.volume * 0.05 : 0)
-  classroomState.noise = Math.round(approach(classroomState.noise, noiseTarget, 0.1, 32, 78))
-
-  const energyTarget =
-    4.8 +
-    classroomState.peopleCount * 0.055 +
-    (light.on && light.online ? light.brightness * 0.018 : 0.2) +
-    (ac.on && ac.online ? 3.1 + Math.max(classroomState.temperature - ac.targetTemperature, 0) * 0.35 : 0.35) +
-    (freshAir.on && freshAir.online ? 1.4 : 0.2) +
-    (curtain.on && curtain.online ? 0.25 : 0.08) +
-    (multimedia.on && multimedia.online ? multimedia.volume * 0.017 : 0.1)
-  classroomState.energy = round1(approach(classroomState.energy, energyTarget, 0.12, 3, 28))
-
-  if (tickMs > 0) {
-    Object.values(classroomState.devices).forEach((device) => {
-      if (Math.random() < 0.0003) device.online = false
-    })
-  }
-}
-
-function appendHistoryPoint(timestampMs = lastTickAt) {
-  const item = historyItem(timestampMs)
-  if (historyData.length && historyData[historyData.length - 1].generatedAt === item.generatedAt) return
-  historyData.push(item)
-  if (historyData.length > HISTORY_LIMIT) historyData.splice(0, historyData.length - HISTORY_LIMIT)
-  lastHistoryAt = timestampMs
-}
-
-function appendCurrentAlarms() {
-  const alarms = buildCurrentAlarms()
-  alarms.forEach((alarm) => {
-    const key = `${alarm.type}-${alarm.classroom_id}`
-    const exists = alarmRecords.find((item) => item.key === key && item.status === '未处理')
-    if (exists) {
-      exists.time = alarm.time
-      exists.content = alarm.content
-      exists.value = alarm.value
-      return
-    }
-    alarmRecords.unshift({ ...alarm, key, id: `${key}-${alarm.generatedAt || classroomState.generatedAt}` })
-  })
-  if (alarmRecords.length > ALARM_LIMIT) alarmRecords.splice(ALARM_LIMIT)
-}
-
-function buildCurrentAlarms() {
-  const now = classroomState.currentTime
-  const records = []
-  if (classroomState.co2 > 1000) {
-    records.push({
-      time: now,
-      classroom_id: classroomState.classroomId,
-      type: '空气质量报警',
-      level: classroomState.co2 > 1500 ? 'danger' : 'warning',
-      value: classroomState.co2,
-      content: `CO2 当前 ${classroomState.co2} ppm，超过 1000 ppm，建议开启或提高新风。`,
-      status: '未处理'
-    })
-  }
-  if (classroomState.temperature > 30) {
-    records.push({
-      time: now,
-      classroom_id: classroomState.classroomId,
-      type: '温度异常报警',
-      level: 'danger',
-      value: classroomState.temperature,
-      content: `温度当前 ${classroomState.temperature} ℃，超过 30 ℃，建议开启空调制冷。`,
-      status: '未处理'
-    })
-  }
-  if (classroomState.energy > 16) {
-    records.push({
-      time: now,
-      classroom_id: classroomState.classroomId,
-      type: '能耗异常报警',
-      level: classroomState.energy > 20 ? 'danger' : 'warning',
-      value: classroomState.energy,
-      content: `当前能耗 ${classroomState.energy} kWh，高于演示阈值 16 kWh，建议启用节能策略。`,
-      status: '未处理'
-    })
-  }
-  Object.entries(classroomState.devices).forEach(([key, device]) => {
-    if (!device.online) {
-      records.push({
-        time: now,
-        classroom_id: classroomState.classroomId,
-        type: '设备异常报警',
-        level: 'danger',
-        value: key,
-        content: `${deviceLabel(key)} 离线，请检查网关或设备电源。`,
-        status: '未处理'
-      })
-    }
-  })
-  return records.map((item) => ({
-    ...item,
-    currentTime: now,
-    updatedAt: now,
-    generatedAt: now
-  }))
-}
-
-function seedHistory() {
-  const nowMs = Date.now()
-  const savedTick = lastTickAt
-  const start = Date.now() - 72 * 5 * 60 * 1000
-  for (let index = 0; index < 72; index += 1) {
-    const t = start + index * 5 * 60 * 1000
-    lastTickAt = t
-    simulateStep(t)
-    syncStateTime(t)
-    historyData.push(historyItem(t))
-  }
-  lastTickAt = Math.max(savedTick, nowMs)
-  syncStateTime(lastTickAt)
-  lastHistoryAt = lastTickAt
-}
-
-function historyItem(timestampMs = lastTickAt) {
-  const date = new Date(timestampMs)
-  const stamp = formatDate(date)
   return {
-    time: formatTime(date),
-    date: formatMonthDay(date),
-    currentTime: stamp,
-    updatedAt: stamp,
-    update_time: stamp,
-    generatedAt: stamp,
-    classroom_id: classroomState.classroomId,
-    classroomId: classroomState.classroomId,
-    temperature: classroomState.temperature,
-    humidity: classroomState.humidity,
-    co2: classroomState.co2,
-    light: classroomState.light,
-    peopleCount: classroomState.peopleCount,
-    people_count: classroomState.peopleCount,
-    energy: classroomState.energy,
-    pm25: classroomState.pm25,
-    noise: classroomState.noise
+    classroomId: state.classroomId,
+    classroom_id: state.classroomId,
+    classroomName: state.classroomName,
+    name: state.name,
+    building: state.building,
+    floor: state.floor,
+    area: state.area,
+    capacity: state.capacity,
+    temperature: round(state.temperature),
+    humidity: round(state.humidity),
+    co2: Math.round(state.co2),
+    pm25: round(state.pm25),
+    noise: round(state.noise),
+    light: Math.round(state.light),
+    peopleCount: Math.round(state.peopleCount),
+    energy: round(state.energy, 2),
+    time: timestamp,
+    timestamp,
+    updatedAt: timestamp,
+    generatedAt: timestamp,
+    update_time: timestamp
   }
 }
 
-function serializeState() {
-  const serializedDevices = JSON.parse(JSON.stringify(classroomState.devices))
-  return {
-    classroomId: classroomState.classroomId,
-    classroom_id: classroomState.classroomId,
-    temperature: classroomState.temperature,
-    humidity: classroomState.humidity,
-    co2: classroomState.co2,
-    light: classroomState.light,
-    peopleCount: classroomState.peopleCount,
-    people_count: classroomState.peopleCount,
-    energy: classroomState.energy,
-    pm25: classroomState.pm25,
-    noise: classroomState.noise,
-    devices: serializedDevices,
-    currentTime: classroomState.currentTime,
-    updatedAt: classroomState.updatedAt,
-    generatedAt: classroomState.generatedAt,
-    update_time: classroomState.updatedAt,
-    status: statusByState(),
-    ...deviceStatuses()
+const pushHistoryPoint = (runtime, timestampMs) => {
+  const point = createHistoryPoint(runtime, timestampMs)
+  runtime.historyData.push(point)
+  if (runtime.historyData.length > 288) {
+    runtime.historyData.splice(0, runtime.historyData.length - 288)
   }
+  runtime.lastHistoryAt = timestampMs
 }
 
-function deviceStatuses() {
-  return {
-    light_status: classroomState.devices.light.on && classroomState.devices.light.online ? 'on' : 'off',
-    ac_status: classroomState.devices.airConditioner.on && classroomState.devices.airConditioner.online ? 'on' : 'off',
-    ventilation_status: classroomState.devices.freshAir.on && classroomState.devices.freshAir.online ? 'on' : 'off',
-    curtain_status: classroomState.devices.curtain.on && classroomState.devices.curtain.online ? 'on' : 'off',
-    multimedia_status: classroomState.devices.multimedia.on && classroomState.devices.multimedia.online ? 'on' : 'off'
-  }
-}
-
-function statusByState() {
-  if (classroomState.co2 > 1500 || classroomState.temperature > 30 || classroomState.energy > 20) return 'danger'
-  if (classroomState.co2 > 1000 || classroomState.temperature > 28 || classroomState.energy > 16) return 'warning'
-  return 'normal'
-}
-
-function applyDevicePayload(key, device, payload) {
-  if (key === 'light' && Number.isFinite(Number(payload.brightness))) {
-    device.brightness = clamp(Number(payload.brightness), 0, 100)
-    device.on = device.brightness > 0
-  }
-  if (key === 'airConditioner') {
-    if (Number.isFinite(Number(payload.temperature))) device.targetTemperature = clamp(Number(payload.temperature), 18, 30)
-    if (payload.mode) device.mode = String(payload.mode)
-  }
-  if (key === 'freshAir' && payload.speed) device.speed = String(payload.speed)
-  if (key === 'curtain' && Number.isFinite(Number(payload.opening))) {
-    device.opening = clamp(Number(payload.opening), 0, 100)
-    device.on = device.opening > 0
-  }
-  if (key === 'multimedia' && Number.isFinite(Number(payload.volume))) {
-    device.volume = clamp(Number(payload.volume), 0, 100)
-    device.on = device.volume > 0
-  }
-}
-
-function normalizeDeviceKey(device) {
-  const value = String(device || '').toLowerCase()
-  const map = {
-    light: 'light',
-    lamp: 'light',
-    ac: 'airConditioner',
-    airconditioner: 'airConditioner',
-    air_conditioner: 'airConditioner',
-    ventilation: 'freshAir',
-    freshair: 'freshAir',
-    fresh_air: 'freshAir',
-    curtain: 'curtain',
-    media: 'multimedia',
-    multimedia: 'multimedia'
-  }
-  return map[value]
-}
-
-function deviceLabel(key) {
-  return {
-    light: '灯光系统',
-    airConditioner: '空调系统',
-    freshAir: '新风系统',
-    curtain: '窗帘系统',
-    multimedia: '多媒体设备'
-  }[key] || key
-}
-
-function approach(current, target, ratio, min, max) {
-  const next = current + (target - current) * ratio + smoothNoise(0.18)
+const softMove = (current, target, factor, noise = 0, min = -Infinity, max = Infinity) => {
+  const next = current + (target - current) * factor + (Math.random() - 0.5) * noise
   return clamp(next, min, max)
 }
 
-function smoothNoise(scale) {
-  return (Math.random() - 0.5) * scale
-}
-
-function clamp(value, min, max) {
-  return Math.max(min, Math.min(max, value))
-}
-
-function round1(value) {
-  return Math.round(value * 10) / 10
-}
-
-function syncStateTime(timestampMs) {
+const simulateStep = (runtime, timestampMs) => {
+  const state = runtime.state
+  const profile = runtime.profile
+  const devices = state.devices
   const date = new Date(timestampMs)
-  const stamp = formatDate(date)
-  classroomState.currentTime = stamp
-  classroomState.updatedAt = stamp
-  classroomState.generatedAt = stamp
+  const hour = date.getHours() + date.getMinutes() / 60
+  const teachingTime = hour >= 8 && hour <= 21
+  const minuteWave = Math.sin(timestampMs / 1000 / 720 + profile.phase)
+  const shortWave = Math.sin(timestampMs / 1000 / 180 + profile.phase * 1.7)
+
+  const peopleTarget = teachingTime
+    ? profile.peopleBase + minuteWave * profile.peopleSwing + shortWave * 2
+    : profile.nightPeople + Math.max(0, shortWave)
+
+  state.peopleCount = Math.round(softMove(state.peopleCount, peopleTarget, 0.22, 1.8, 0, state.capacity))
+
+  const peopleLoad = state.peopleCount / Math.max(1, state.capacity)
+  const acCooling = devices.airConditioner?.status && devices.airConditioner?.online !== false ? 2.4 : -0.4
+  const temperatureTarget = profile.temperatureBase + peopleLoad * 4.2 - acCooling + Math.sin(hour / 24 * Math.PI * 2 + profile.phase) * 1.2
+  state.temperature = round(softMove(state.temperature, temperatureTarget, 0.12, 0.12, 18, 34))
+
+  const freshAirActive = devices.freshAir?.status && devices.freshAir?.online !== false
+  const co2Target = profile.co2Base + profile.co2Bias + state.peopleCount * 8.5 - (freshAirActive ? 230 : 0)
+  state.co2 = Math.round(softMove(state.co2, co2Target, 0.18, 8, 420, 1800))
+
+  const humidityTarget = profile.humidityBase + peopleLoad * 8 - (devices.airConditioner?.status ? 3 : 0) + (freshAirActive ? -2 : 1)
+  state.humidity = round(softMove(state.humidity, humidityTarget, 0.1, 0.28, 35, 78))
+
+  const lightTarget = devices.light?.status
+    ? profile.lightBase + 260 + (devices.curtain?.status ? 140 : -60)
+    : 80 + (devices.curtain?.status ? 140 : 35)
+  state.light = Math.round(softMove(state.light, lightTarget, 0.26, 10, 30, 980))
+
+  const pm25Target = profile.pm25Base + (freshAirActive ? -5 : 8) + (profile.classroomId === 'C301' ? shortWave * 8 : shortWave * 2)
+  state.pm25 = round(softMove(state.pm25, pm25Target, 0.14, 0.8, 5, 95))
+
+  const noiseTarget = profile.noiseBase + peopleLoad * 18 + (devices.multimedia?.status ? 4 : 0) + (profile.classroomId === 'C301' ? 4 : 0)
+  state.noise = round(softMove(state.noise, noiseTarget, 0.18, 1.1, 28, 82))
+
+  const deviceEnergy = computeDeviceEnergy(devices)
+  const energyTarget = profile.energyBase + deviceEnergy + state.peopleCount * 0.035 + (state.light > 650 ? 0.5 : 0)
+  state.energy = round(softMove(state.energy, energyTarget, 0.16, 0.16, 1.5, 18), 2)
+
+  const generatedAt = new Date(timestampMs).toISOString()
+  state.currentTime = generatedAt
+  state.updatedAt = generatedAt
+  state.generatedAt = generatedAt
+  state.update_time = generatedAt
+  state.status = state.co2 > 1000 || state.temperature > 30 || state.energy > profile.energyAlarm || state.pm25 > 55 || state.noise > 68
+    ? 'warning'
+    : 'normal'
 }
 
-function ensureHistorySynced() {
-  if (!historyData.length) {
-    appendHistoryPoint(lastTickAt)
+const getRuntime = (classroomId = DEFAULT_CLASSROOM_ID) => {
+  const normalizedId = normalizeClassroomId(classroomId)
+  if (!runtimeMap.has(normalizedId)) {
+    const profile = getProfile(normalizedId)
+    const runtime = {
+      profile,
+      state: createInitialState(profile),
+      historyData: [],
+      alarmRecords: [],
+      lastTickAt: Date.now(),
+      lastHistoryAt: 0
+    }
+
+    const start = Date.now() - 2 * 60 * 60 * 1000
+    for (let i = 0; i < 48; i += 1) {
+      const timestamp = start + i * 150000
+      simulateStep(runtime, timestamp)
+      pushHistoryPoint(runtime, timestamp)
+    }
+    runtime.lastTickAt = Date.now()
+    runtimeMap.set(normalizedId, runtime)
+  }
+
+  return runtimeMap.get(normalizedId)
+}
+
+const advanceSimulation = (runtime) => {
+  const now = Date.now()
+  let elapsed = now - runtime.lastTickAt
+  if (elapsed <= 0) {
+    simulateStep(runtime, now)
     return
   }
-  const last = historyData[historyData.length - 1]
-  const lastMs = parseDateTime(last.generatedAt)
-  const currentMs = parseDateTime(classroomState.generatedAt)
-  if (!Number.isFinite(lastMs) || !Number.isFinite(currentMs) || Math.abs(currentMs - lastMs) > HISTORY_SYNC_TOLERANCE_MS) {
-    appendHistoryPoint(lastTickAt)
+
+  const step = 15000
+  while (elapsed > 0) {
+    const tickAt = runtime.lastTickAt + Math.min(step, elapsed)
+    simulateStep(runtime, tickAt)
+    runtime.lastTickAt = tickAt
+    elapsed = now - runtime.lastTickAt
+  }
+
+  if (now - runtime.lastHistoryAt >= 150000) {
+    pushHistoryPoint(runtime, now)
+  } else if (runtime.historyData.length) {
+    runtime.historyData[runtime.historyData.length - 1] = createHistoryPoint(runtime, now)
   }
 }
 
-function formatDate(date) {
-  const parts = getTimeParts(date, SIM_TIMEZONE)
-  return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`
-}
+const buildCurrentAlarms = (runtime) => {
+  const state = runtime.state
+  const alarms = []
+  const time = state.updatedAt || nowIso()
+  const base = {
+    classroomId: state.classroomId,
+    classroom_id: state.classroomId,
+    classroomName: state.classroomName,
+    room: state.classroomName,
+    generatedAt: time,
+    time,
+    status: '未处理'
+  }
 
-function formatTime(date) {
-  const parts = getTimeParts(date, SIM_TIMEZONE)
-  return `${parts.hour}:${parts.minute}:${parts.second}`
-}
+  if (state.co2 > 1000) {
+    alarms.push({
+      ...base,
+      id: `${state.classroomId}-co2-${time}`,
+      type: '空气质量报警',
+      level: state.co2 > 1300 ? 'high' : 'medium',
+      title: `${state.classroomName} CO2 浓度偏高`,
+      message: `当前 CO2 浓度 ${Math.round(state.co2)} ppm，建议开启新风或通风。`,
+      value: Math.round(state.co2),
+      metric: 'co2',
+      threshold: 1000
+    })
+  }
 
-function formatMonthDay(date) {
-  const parts = getTimeParts(date, SIM_TIMEZONE)
-  return `${parts.month}-${parts.day}`
-}
+  if (state.temperature > 30) {
+    alarms.push({
+      ...base,
+      id: `${state.classroomId}-temperature-${time}`,
+      type: '温度异常报警',
+      level: state.temperature > 32 ? 'high' : 'medium',
+      title: `${state.classroomName} 温度偏高`,
+      message: `当前温度 ${round(state.temperature)} ℃，建议开启空调并降低人员密度。`,
+      value: round(state.temperature),
+      metric: 'temperature',
+      threshold: 30
+    })
+  }
 
-function getHourInTimezone(date, timezone) {
-  return Number(getTimeParts(date, timezone).hour) + Number(getTimeParts(date, timezone).minute) / 60
-}
+  if (state.energy > runtime.profile.energyAlarm) {
+    alarms.push({
+      ...base,
+      id: `${state.classroomId}-energy-${time}`,
+      type: '能耗异常报警',
+      level: 'medium',
+      title: `${state.classroomName} 能耗偏高`,
+      message: `当前能耗 ${round(state.energy, 2)} kW，高于 ${runtime.profile.energyAlarm} kW 阈值。`,
+      value: round(state.energy, 2),
+      metric: 'energy',
+      threshold: runtime.profile.energyAlarm
+    })
+  }
 
-function getTimeParts(date, timezone) {
-  const formatter = new Intl.DateTimeFormat('en-CA', {
-    timeZone: timezone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false
+  if (state.pm25 > 55) {
+    alarms.push({
+      ...base,
+      id: `${state.classroomId}-pm25-${time}`,
+      type: '空气颗粒物报警',
+      level: state.pm25 > 75 ? 'high' : 'medium',
+      title: `${state.classroomName} PM2.5 偏高`,
+      message: `当前 PM2.5 为 ${round(state.pm25)} μg/m³，建议开启新风并检查过滤系统。`,
+      value: round(state.pm25),
+      metric: 'pm25',
+      threshold: 55
+    })
+  }
+
+  if (state.noise > 68) {
+    alarms.push({
+      ...base,
+      id: `${state.classroomId}-noise-${time}`,
+      type: '噪声异常报警',
+      level: 'low',
+      title: `${state.classroomName} 噪声偏高`,
+      message: `当前噪声 ${round(state.noise)} dB，建议调整课堂活动和多媒体音量。`,
+      value: round(state.noise),
+      metric: 'noise',
+      threshold: 68
+    })
+  }
+
+  Object.entries(state.devices).forEach(([key, device]) => {
+    if (device.online === false) {
+      alarms.push({
+        ...base,
+        id: `${state.classroomId}-device-${key}-${time}`,
+        type: '设备异常报警',
+        level: 'high',
+        title: `${state.classroomName} ${device.name || key} 离线`,
+        message: `${device.name || key} 当前离线，请检查设备网关或供电状态。`,
+        value: 0,
+        metric: key,
+        threshold: 1
+      })
+    }
   })
-  const map = {}
-  formatter.formatToParts(date).forEach((part) => {
-    if (part.type !== 'literal') map[part.type] = part.value
+
+  return alarms
+}
+
+const syncAlarmRecords = (runtime) => {
+  const current = buildCurrentAlarms(runtime)
+  current.forEach((alarm) => {
+    const duplicate = runtime.alarmRecords.find((item) => (
+      item.classroomId === alarm.classroomId
+      && item.type === alarm.type
+      && item.metric === alarm.metric
+      && Math.abs(new Date(item.generatedAt).getTime() - new Date(alarm.generatedAt).getTime()) < 5 * 60 * 1000
+    ))
+
+    if (!duplicate) {
+      runtime.alarmRecords.unshift(alarm)
+    } else {
+      Object.assign(duplicate, alarm, { id: duplicate.id })
+    }
   })
-  return map
+
+  if (runtime.alarmRecords.length > 60) {
+    runtime.alarmRecords.splice(60)
+  }
+
+  return [...current, ...runtime.alarmRecords.filter((alarm) => (
+    !current.some((item) => item.type === alarm.type && item.metric === alarm.metric)
+  ))]
 }
 
-function parseDateTime(value) {
-  if (!value) return NaN
-  const normalized = String(value).replace(' ', 'T')
-  const ms = Date.parse(normalized)
-  return Number.isFinite(ms) ? ms : NaN
+export const classroomStates = Object.fromEntries(
+  Object.keys(classroomProfiles).map((classroomId) => [classroomId, getRuntime(classroomId).state])
+)
+
+export const classroomState = classroomStates[DEFAULT_CLASSROOM_ID]
+
+export const getSimulationTime = (classroomId = DEFAULT_CLASSROOM_ID) => {
+  const runtime = getRuntime(classroomId)
+  advanceSimulation(runtime)
+  return runtime.state.updatedAt
 }
 
-export function getSimulationTime() {
-  const timestampMs = parseDateTime(classroomState.generatedAt)
+export const getLatestClassroom = (classroomId = DEFAULT_CLASSROOM_ID) => {
+  const runtime = getRuntime(classroomId)
+  advanceSimulation(runtime)
+  return serializeState(runtime)
+}
+
+export const getHistoryData = (limit = 72, classroomId = DEFAULT_CLASSROOM_ID) => {
+  const runtime = getRuntime(classroomId)
+  advanceSimulation(runtime)
+  const max = Number(limit) || 72
+  return runtime.historyData.slice(-max)
+}
+
+export const getAlarmList = (classroomId = DEFAULT_CLASSROOM_ID) => {
+  const runtime = getRuntime(classroomId)
+  advanceSimulation(runtime)
+  return syncAlarmRecords(runtime).slice(0, 30)
+}
+
+export const controlDevice = (payload = {}) => {
+  const classroomId = payload.classroomId || payload.classroom_id || payload.room || DEFAULT_CLASSROOM_ID
+  const runtime = getRuntime(classroomId)
+  advanceSimulation(runtime)
+
+  const deviceId = payload.deviceId || payload.device || payload.type
+  const status = payload.status ?? payload.value ?? payload.enabled ?? payload.action
+  const normalizedDeviceId = {
+    air: 'airConditioner',
+    ac: 'airConditioner',
+    airConditioner: 'airConditioner',
+    fresh_air: 'freshAir',
+    ventilation: 'freshAir',
+    freshAir: 'freshAir',
+    light: 'light',
+    curtain: 'curtain',
+    multimedia: 'multimedia'
+  }[deviceId] || deviceId
+
+  if (!normalizedDeviceId || !runtime.state.devices[normalizedDeviceId]) {
+    return {
+      success: false,
+      message: '设备不存在',
+      classroomId: runtime.state.classroomId,
+      latest: serializeState(runtime)
+    }
+  }
+
+  if (typeof status === 'boolean') {
+    runtime.state.devices[normalizedDeviceId].status = status
+  } else if (status === 1 || status === '1' || status === 'on' || status === 'open') {
+    runtime.state.devices[normalizedDeviceId].status = true
+  } else if (status === 0 || status === '0' || status === 'off' || status === 'close') {
+    runtime.state.devices[normalizedDeviceId].status = false
+  }
+
+  if (payload.position !== undefined && normalizedDeviceId === 'curtain') {
+    runtime.state.devices.curtain.position = clamp(Number(payload.position), 0, 100)
+  }
+
+  if (payload.temperature !== undefined && normalizedDeviceId === 'airConditioner') {
+    runtime.state.devices.airConditioner.temperature = clamp(Number(payload.temperature), 18, 30)
+  }
+
+  simulateStep(runtime, Date.now())
+  pushHistoryPoint(runtime, Date.now())
+
   return {
-    currentTime: classroomState.currentTime,
-    updatedAt: classroomState.updatedAt,
-    generatedAt: classroomState.generatedAt,
-    timestampMs: Number.isFinite(timestampMs) ? timestampMs : lastTickAt
+    success: true,
+    message: '设备控制成功',
+    classroomId: runtime.state.classroomId,
+    deviceId: normalizedDeviceId,
+    status: runtime.state.devices[normalizedDeviceId].status,
+    latest: serializeState(runtime)
+  }
+}
+
+export const buildAnalysisContext = (classroomId = DEFAULT_CLASSROOM_ID) => {
+  const latest = getLatestClassroom(classroomId)
+  const history = getHistoryData(48, classroomId)
+  const alarms = getAlarmList(classroomId)
+
+  return {
+    classroomState: latest,
+    latest,
+    history,
+    alarms,
+    analysisTime: latest.updatedAt,
+    classroomId: latest.classroomId
   }
 }

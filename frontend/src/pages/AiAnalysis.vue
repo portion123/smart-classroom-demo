@@ -1,8 +1,8 @@
 <template>
   <div class="page ai-page">
     <div class="page-title-row">
-      <h2>AI智能分析</h2>
-      <el-tag effect="dark" type="primary">数据更新时间：{{ latest.update_time }}</el-tag>
+      <h2>AI 智能分析</h2>
+      <el-tag effect="dark" type="primary">数据更新时间：{{ latest.updatedAt || latest.update_time || '-' }}</el-tag>
     </div>
 
     <section class="ai-top-grid">
@@ -12,17 +12,17 @@
           <div class="ai-core">AI</div>
           <span v-for="i in 4" :key="i"></span>
         </div>
-        <strong class="score-good">良好</strong>
+        <strong class="score-good">{{ scoreText }}</strong>
         <p class="score-subtitle">舒适健康</p>
-        <p class="score-desc">当前教室环境整体良好，温度、湿度、空气质量等指标均处于舒适范围内，适宜教学活动开展。</p>
-        <div class="eval-time">评估时间：{{ latest.update_time }}</div>
+        <p class="score-desc">{{ roomTitle }} 当前环境评分 {{ environmentScore }} 分，AI 会基于实时数据、历史趋势和报警记录生成建议。</p>
+        <div class="eval-time">评估时间：{{ analysisDisplayTime }}</div>
       </section>
 
       <section class="glass-card digital-twin">
         <div class="panel-head">
           <div>
             <h3>教室环境数字孪生</h3>
-            <p>A205 教室 · 智能监测点位</p>
+            <p>{{ roomTitle }} · {{ latest.building || '-' }} · {{ latest.floor || '-' }}</p>
           </div>
         </div>
         <div class="classroom-3d twin-scene">
@@ -34,24 +34,24 @@
           <div class="room-platform">
             <span v-for="desk in desks" :key="desk.id" class="desk-3d" :style="desk.style"></span>
           </div>
-          <div class="metric-chip" style="left: 22px; top: 62px"><small>温度</small><strong>{{ latest.temperature }}℃</strong><em>舒适</em></div>
+          <div class="metric-chip" style="left: 22px; top: 62px"><small>温度</small><strong>{{ latest.temperature }}℃</strong><em>{{ tempLabel }}</em></div>
           <div class="metric-chip" style="left: 22px; top: 160px"><small>湿度</small><strong>{{ latest.humidity }}%</strong><em>舒适</em></div>
-          <div class="metric-chip" style="left: 22px; bottom: 34px"><small>CO₂</small><strong>{{ latest.co2 }} ppm</strong><em>良好</em></div>
-          <div class="metric-chip" style="right: 22px; top: 62px"><small>PM2.5</small><strong>{{ latest.pm25 }} μg/m³</strong><em>优</em></div>
-          <div class="metric-chip" style="right: 22px; top: 160px"><small>噪声</small><strong>{{ latest.noise }} dB</strong><em>安静</em></div>
-          <div class="metric-chip" style="right: 22px; bottom: 34px"><small>人数</small><strong>{{ latest.people_count }} 人</strong><em>正常</em></div>
+          <div class="metric-chip" style="left: 22px; bottom: 34px"><small>CO2</small><strong>{{ latest.co2 }} ppm</strong><em>{{ co2Label }}</em></div>
+          <div class="metric-chip" style="right: 22px; top: 62px"><small>PM2.5</small><strong>{{ latest.pm25 }} ug/m3</strong><em>{{ pm25Label }}</em></div>
+          <div class="metric-chip" style="right: 22px; top: 160px"><small>噪声</small><strong>{{ latest.noise }} dB</strong><em>{{ noiseLabel }}</em></div>
+          <div class="metric-chip" style="right: 22px; bottom: 34px"><small>人数</small><strong>{{ peopleCount }} 人</strong><em>{{ latest.capacity || '-' }} 容量</em></div>
         </div>
         <div class="twin-score">
-          <span>综合指数：84/100</span>
-          <el-tag type="success" effect="dark">良好</el-tag>
-          <el-progress :percentage="84" :show-text="false" />
+          <span>综合指数：{{ environmentScore }}/100</span>
+          <el-tag :type="environmentScore >= 80 ? 'success' : 'warning'" effect="dark">{{ scoreText }}</el-tag>
+          <el-progress :percentage="environmentScore" :show-text="false" />
         </div>
       </section>
 
       <section class="glass-card ai-conclusion">
         <div class="panel-head">
-          <h3>AI分析结论</h3>
-          <el-button link type="primary" :loading="loading" @click="generate">查看详情</el-button>
+          <h3>AI 分析结论</h3>
+          <el-button link type="primary" :loading="loading" @click="generate">生成 AI 分析</el-button>
         </div>
         <div class="conclusion-list">
           <article v-for="item in conclusionCards" :key="item.title" :class="item.tone">
@@ -65,8 +65,8 @@
         <div v-if="analysis" class="ai-result-panel">
           <div class="result-head">
             <strong>{{ analysisTitle }}</strong>
-            <el-tag :type="aiMode === 'llm' ? 'success' : 'warning'" effect="dark">
-              {{ aiMode === 'llm' ? 'LLM' : 'MOCK' }}
+            <el-tag :type="aiMode === 'llm' ? 'success' : analysisIsCached ? 'info' : 'warning'" effect="dark">
+              {{ aiMode === 'llm' ? 'LLM' : analysisIsCached ? '缓存分析' : 'MOCK' }}
             </el-tag>
           </div>
           <p class="analysis-text">{{ analysis }}</p>
@@ -106,7 +106,7 @@
     </section>
 
     <section class="ai-bottom-grid">
-      <ChartPanel title="关键指标趋势预测（未来30分钟）" subtitle="预测时间：30分钟" :option="forecastOption" height="238px" />
+      <ChartPanel title="关键指标趋势预测（最近采样）" subtitle="来自当前教室历史数据" :option="forecastOption" height="238px" />
       <section class="glass-card energy-advice">
         <div class="panel-head"><h3>能耗优化建议</h3></div>
         <div class="energy-content">
@@ -129,7 +129,7 @@
     <section class="glass-card ai-action-bar">
       <div class="ai-mini-core">AI</div>
       <p>
-        <b>{{ aiMode === 'llm' ? 'AI 实时分析结果' : aiMode === 'mock' ? '模拟分析结果' : 'AI综合建议' }}</b>
+        <b>{{ aiMode === 'llm' ? 'AI 实时分析结果' : analysisIsCached ? '缓存分析结果' : '模拟分析结果' }}</b>
         {{ optimization.summary }}
         <small v-if="aiMode === 'mock' && aiError" class="ai-debug-tip">{{ aiError }}</small>
       </p>
@@ -151,13 +151,16 @@
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, inject, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { CircleCheck, Connection, MagicStick, Monitor, View, Warning } from '@element-plus/icons-vue'
 import ChartPanel from '../components/ChartPanel.vue'
 import { analyzeAi, getHistoryData, getLatestClassroom } from '../api/request'
 
-const latest = ref({ temperature: 26.1, humidity: 62, co2: 980, pm25: 28, noise: 45, people_count: 36, update_time: '2025-05-23 10:24:36' })
+const appNavigation = inject('appNavigation', null)
+const selectedClassroom = computed(() => appNavigation?.selectedClassroom?.value || 'A205')
+
+const latest = ref({ classroomId: selectedClassroom.value, classroomName: `${selectedClassroom.value} 教室`, temperature: 26.1, humidity: 62, co2: 980, pm25: 28, noise: 45, people_count: 36, peopleCount: 36, energy: 8.8, update_time: '' })
 const history = ref([])
 const analysis = ref('')
 const aiResult = ref(null)
@@ -170,37 +173,68 @@ const optimizationLoading = ref(false)
 const previewVisible = ref(false)
 const analysisCache = ref({ key: '', payload: null, analysisTime: '' })
 let refreshTimer = null
+
 const optimization = ref({
-  ac: '维持26℃，适时调节',
-  ventilation: '中档运行，按需通风',
-  light: '调光至80%亮度',
+  ac: '维持 26℃，按需调整',
+  ventilation: '按 CO2 自动调节新风',
+  light: '按光照自动调光',
   saving: '节能 15%',
-  summary: '建议开启新风系统保持空气流通，维持空调26℃，提高空气质量，预计可提升学习专注度。'
+  summary: '建议结合人数和 CO2 趋势联动新风、空调与照明，优先保障舒适度并降低空转能耗。'
 })
 
-const analysisTitle = computed(() => (aiMode.value === 'llm' ? 'AI 实时分析结果' : aiMode.value === 'mock' ? '模拟分析结果' : 'AI 分析结果'))
+const currentClassroomId = computed(() => latest.value.classroomId || latest.value.classroom_id || selectedClassroom.value)
+const roomTitle = computed(() => latest.value.classroomName || latest.value.name || `${currentClassroomId.value} 教室`)
+const peopleCount = computed(() => latest.value.peopleCount ?? latest.value.people_count ?? 0)
+const analysisDisplayTime = computed(() => analysisTime.value || latest.value.updatedAt || latest.value.update_time || '-')
+
+const environmentScore = computed(() => {
+  const penalties = [
+    Math.max(0, (Number(latest.value.co2 || 0) - 800) / 25),
+    Math.max(0, (Number(latest.value.temperature || 0) - 26) * 3),
+    Math.max(0, (Number(latest.value.pm25 || 0) - 35) / 2),
+    Math.max(0, (Number(latest.value.noise || 0) - 55) / 1.5)
+  ]
+  return Math.max(60, Math.round(96 - penalties.reduce((sum, value) => sum + value, 0)))
+})
+const scoreText = computed(() => environmentScore.value >= 86 ? '良好' : environmentScore.value >= 75 ? '可控' : '需关注')
+const tempLabel = computed(() => latest.value.temperature > 28 ? '偏高' : '舒适')
+const co2Label = computed(() => latest.value.co2 > 1000 ? '偏高' : '良好')
+const pm25Label = computed(() => latest.value.pm25 > 55 ? '偏高' : '优')
+const noiseLabel = computed(() => latest.value.noise > 68 ? '偏高' : '安静')
+
+const analysisTitle = computed(() => (aiMode.value === 'llm' ? 'AI 实时分析结果' : analysisIsCached.value ? '缓存分析结果' : '模拟分析结果'))
 const structuredProblems = computed(() => normalizeTextList(aiResult.value?.problems, '暂无明显问题'))
 const structuredSuggestions = computed(() => normalizeTextList(aiResult.value?.suggestions, '保持当前策略并持续观察'))
 const structuredDeviceActions = computed(() => (Array.isArray(aiResult.value?.deviceActions) && aiResult.value.deviceActions.length
   ? aiResult.value.deviceActions
   : [{ device: '设备', action: '暂无需要立即执行的动作', reason: '' }]))
 
-const mockAnalysisText =
-  '当前环境判断：A205 教室 CO₂ 与温度处于偏高区间，建议执行节能舒适平衡策略。\n\n' +
-  '存在问题：CO₂ 达到 1450 ppm，温度 28.6℃，新风关闭且灯光亮度偏高。\n\n' +
-  '调控建议：空调设为 26℃；新风开启；灯光亮度调整为 80%。\n\n' +
-  '节能建议：执行后预计节能 18%，并将 CO₂ 降至约 1000 ppm。'
+const mockAnalysisText = computed(() =>
+  `${roomTitle.value} 当前由本地模拟 AI 生成分析。\n\n` +
+  `当前环境：温度 ${latest.value.temperature}℃，CO2 ${latest.value.co2} ppm，能耗 ${latest.value.energy} kW。\n\n` +
+  `调控建议：${latest.value.co2 > 1000 ? '优先提高新风档位；' : '新风低速巡航；'}空调保持舒适区间；照明按光照自动调整。\n\n` +
+  '节能建议：课后自动关闭多媒体、照明和空调，减少空转能耗。'
+)
 
 const currentClassroomPayload = computed(() => ({
+  classroomId: currentClassroomId.value,
+  classroom_id: currentClassroomId.value,
   classroomData: {
-    room: latest.value.classroom_id || latest.value.room || 'A205',
+    classroomId: currentClassroomId.value,
+    classroom_id: currentClassroomId.value,
+    room: currentClassroomId.value,
+    classroomName: roomTitle.value,
+    building: latest.value.building,
+    floor: latest.value.floor,
+    area: latest.value.area,
+    capacity: latest.value.capacity,
     temperature: latest.value.temperature ?? 28.6,
     humidity: latest.value.humidity ?? 68,
     co2: latest.value.co2 ?? 1450,
     light: latest.value.light ?? 720,
     pm25: latest.value.pm25 ?? 42,
     noise: latest.value.noise ?? 56,
-    people_count: latest.value.people_count ?? 48,
+    people_count: peopleCount.value,
     energy: latest.value.energy ?? 12.8,
     light_status: latest.value.light_status || 'on',
     ac_status: latest.value.ac_status || 'on',
@@ -212,7 +246,7 @@ const currentClassroomPayload = computed(() => ({
 
 function buildAnalysisCacheKey() {
   return [
-    latest.value.classroom_id || latest.value.room || 'A205',
+    currentClassroomId.value,
     latest.value.temperature,
     latest.value.humidity,
     latest.value.co2,
@@ -222,7 +256,8 @@ function buildAnalysisCacheKey() {
 }
 
 async function refreshRealtimeData() {
-  const [latestData, historyData] = await Promise.all([getLatestClassroom(), getHistoryData()])
+  const id = selectedClassroom.value
+  const [latestData, historyData] = await Promise.all([getLatestClassroom(id), getHistoryData(id)])
   latest.value = latestData
   history.value = historyData
 }
@@ -240,30 +275,31 @@ const desks = Array.from({ length: 15 }, (_, index) => {
 })
 
 const conclusionCards = computed(() => {
+  const result = aiResult.value
   const paragraphs = analysis.value.split(/\n+/).filter(Boolean)
   return [
-    { title: '当前判断', text: extract(paragraphs, 0, '教室环境整体良好，学生体感舒适，专注度较高，适宜学习。'), icon: CircleCheck, tone: 'ok' },
-    { title: '存在问题', text: extract(paragraphs, 1, 'CO₂浓度已接近1000 ppm，下午时段人数增加后可能超标。'), icon: Warning, tone: 'warn' },
-    { title: '调控建议', text: extract(paragraphs, 2, '建议开启新风系统，保持空气流通；空调维持26℃，避免温度波动。'), icon: Monitor, tone: 'blue' },
-    { title: '节能建议', text: extract(paragraphs, 3, '利用自然通风，减少新风机高档运行时长，休息时段适当调高空调温度。'), icon: Connection, tone: 'green' }
+    { title: '当前判断', text: result?.summary || extract(paragraphs, 0, `${roomTitle.value} 当前环境评分 ${environmentScore.value} 分。`), icon: CircleCheck, tone: 'ok' },
+    { title: '存在问题', text: structuredProblems.value.join('；'), icon: Warning, tone: 'warn' },
+    { title: '调控建议', text: structuredDeviceActions.value.map((item) => `${item.device}${item.action}`).join('；'), icon: Monitor, tone: 'blue' },
+    { title: '节能建议', text: structuredSuggestions.value.join('；'), icon: Connection, tone: 'green' }
   ]
 })
 
-const previewRows = [
-  { name: 'CO₂', before: '1450 ppm', after: '1000 ppm' },
-  { name: '温度', before: '28.6℃', after: '26℃' },
-  { name: '新风', before: '关闭', after: '开启' },
-  { name: '灯光亮度', before: '100%', after: '80%' },
-  { name: '预计节能', before: '-', after: '18%' }
-]
+const previewRows = computed(() => [
+  { name: 'CO2', before: `${latest.value.co2} ppm`, after: latest.value.co2 > 1000 ? '900 ppm 以下' : '保持稳定' },
+  { name: '温度', before: `${latest.value.temperature}℃`, after: latest.value.temperature > 28 ? '26℃' : '保持当前' },
+  { name: '新风', before: latest.value.ventilation_status || '-', after: latest.value.co2 > 1000 ? '中速运行' : '低速巡航' },
+  { name: '照明亮度', before: `${latest.value.light || '-'} lux`, after: '按自然光调节' },
+  { name: '预计节能', before: '-', after: optimization.value.saving }
+])
 
-const basis = [
-  { title: '实时环境数据', text: '来自后端动态模拟器的实时课堂状态' },
-  { title: '历史趋势数据', text: '最近一段时间的温湿度、CO₂、光照、人数与能耗曲线' },
-  { title: '设备运行状态', text: '空调、新风、照明、窗帘、多媒体等设备状态' },
-  { title: '教室使用情况', text: '当前人数、课程安排与使用时长' },
-  { title: '节能模型', text: 'AI节能模型与多维度算法分析' }
-]
+const basis = computed(() => [
+  { title: '实时环境数据', text: `${roomTitle.value} 最新动态模拟数据。` },
+  { title: '历史趋势数据', text: '最近一段时间的温湿度、CO2、光照、人数与能耗曲线。' },
+  { title: '设备运行状态', text: '空调、新风、照明、窗帘、多媒体等设备状态。' },
+  { title: '教室使用情况', text: `当前人数 ${peopleCount.value} / 容量 ${latest.value.capacity || '-'}。` },
+  { title: '节能模型', text: 'AI 节能模型与多维度规则分析。' }
+])
 
 const forecastOption = computed(() => {
   const points = history.value.slice(-18)
@@ -280,8 +316,8 @@ const forecastOption = computed(() => {
     ],
     series: [
       { name: '温度(℃)', type: 'line', smooth: true, data: points.map((item) => item.temperature), lineStyle: { width: 3 } },
-      { name: 'CO₂(ppm)', type: 'line', smooth: true, yAxisIndex: 1, data: points.map((item) => item.co2), lineStyle: { width: 3 } },
-      { name: '人数(人)', type: 'line', smooth: true, data: points.map((item) => item.people_count), lineStyle: { width: 3 } }
+      { name: 'CO2(ppm)', type: 'line', smooth: true, yAxisIndex: 1, data: points.map((item) => item.co2), lineStyle: { width: 3 } },
+      { name: '人数(人)', type: 'line', smooth: true, data: points.map((item) => item.peopleCount ?? item.people_count), lineStyle: { width: 3 } }
     ]
   }
 })
@@ -302,11 +338,11 @@ const savingOption = computed(() => ({
       ]
     }
   ],
-  graphic: [{ type: 'text', left: 'center', top: '42%', style: { text: '预计节能\n18%', fill: '#fff', fontSize: 20, fontWeight: 800, align: 'center' } }]
+  graphic: [{ type: 'text', left: 'center', top: '42%', style: { text: `预计节能\n${optimization.value.saving.replace('节能 ', '')}`, fill: '#fff', fontSize: 20, fontWeight: 800, align: 'center' } }]
 }))
 
 function extract(paragraphs, index, fallback) {
-  return (paragraphs[index] || fallback).replace(/^.*?：/, '')
+  return (paragraphs[index] || fallback).replace(/^.*?[：:]/, '')
 }
 
 function normalizeTextList(value, fallback) {
@@ -337,11 +373,12 @@ async function generate() {
     analysisIsCached.value = false
     applyAiResult(result, { showSuccess: true, fromCache: false })
   } catch (error) {
-    analysis.value = mockAnalysisText
+    analysis.value = mockAnalysisText.value
     aiResult.value = null
     aiMode.value = 'mock'
     analysisIsCached.value = false
     aiError.value = error?.message || '前端调用 AI 分析失败'
+    analysisTime.value = latest.value.updatedAt || latest.value.update_time || ''
     ElMessage.error('AI 分析失败，已使用本地 mock 结果')
   } finally {
     loading.value = false
@@ -351,18 +388,17 @@ async function generate() {
 async function generateOptimization() {
   optimizationLoading.value = true
   try {
-      await new Promise((resolve) => setTimeout(resolve, 1000))
-      const result = await analyzeAi(currentClassroomPayload.value)
-      analysisIsCached.value = false
-      applyAiResult(result)
+    const result = await analyzeAi(currentClassroomPayload.value)
+    analysisIsCached.value = false
+    applyAiResult(result)
     applyOptimizationFromAi(result?.result)
-    await ElMessageBox.alert('空调设为 26℃；新风开启；灯光亮度调整为 80%；预计节能 18%。', '优化方案已生成', {
+    await ElMessageBox.alert(`${roomTitle.value} 优化方案已生成：空调、新风、照明按当前指标联动调节。`, '优化方案已生成', {
       confirmButtonText: '知道了',
       type: 'success'
     })
     ElMessage.success('优化方案已生成，可前往设备控制页执行')
   } catch (error) {
-    analysis.value = mockAnalysisText
+    analysis.value = mockAnalysisText.value
     aiResult.value = null
     aiMode.value = 'mock'
     aiError.value = error?.message || '前端调用 AI 优化失败'
@@ -378,7 +414,7 @@ function applyAiResult(result, options = {}) {
   aiResult.value = structured
   aiMode.value = result?.mode || (result?.fallback ? 'mock' : '')
   aiError.value = result?.error || result?.errorMessage || ''
-  analysis.value = result?.analysis || formatStructuredAnalysis(structured) || mockAnalysisText
+  analysis.value = result?.analysis || formatStructuredAnalysis(structured) || mockAnalysisText.value
   if (options.fromCache && !analysis.value.startsWith('【缓存分析】')) {
     analysis.value = `【缓存分析】\n${analysis.value}`
   }
@@ -398,7 +434,9 @@ function applyAiResult(result, options = {}) {
       generatedAt: resolvedTime
     }
   }
-  if (result?.mode === 'llm') {
+  if (options.showSuccess && options.fromCache) {
+    ElMessage.info('已使用缓存分析')
+  } else if (result?.mode === 'llm') {
     ElMessage.success('AI 实时分析结果已生成')
   } else if (result?.fallback || result?.mode === 'mock') {
     ElMessage.warning(aiError.value ? `模拟分析结果：${aiError.value}` : '已使用模拟分析结果')
@@ -413,19 +451,11 @@ function applyOptimizationFromAi(result = aiResult.value) {
     return item ? item.action : ''
   }
   optimization.value = {
-    ac: actionText('空调') || '空调设为 26℃',
-    ventilation: actionText('新风') || '新风开启',
-    light: actionText('灯光') || '灯光亮度调整为 80%',
-    saving: '预计节能 18%',
-    summary: result?.summary || '空调设为 26℃；新风开启；灯光亮度调整为 80%；预计节能 18%。'
-  }
-  latest.value = {
-    ...latest.value,
-    temperature: 26,
-    co2: 1000,
-    ventilation_status: 'on',
-    update_time: analysisTime.value || latest.value.update_time || latest.value.updatedAt,
-    updatedAt: analysisTime.value || latest.value.updatedAt || latest.value.update_time
+    ac: actionText('空调') || (latest.value.temperature > 28 ? '空调设为 26℃' : '保持当前设定'),
+    ventilation: actionText('新风') || (latest.value.co2 > 1000 ? '新风中速运行' : '新风低速巡航'),
+    light: actionText('灯光') || '按自然光自动调光',
+    saving: '节能 15%',
+    summary: result?.summary || `${roomTitle.value} 建议按 CO2、温度和人数联动调节设备，预计可降低空转能耗。`
   }
 }
 
@@ -438,6 +468,15 @@ function formatStructuredAnalysis(result) {
     `设备动作：${result.deviceActions?.map((item) => `${item.device}${item.action}`).join('；') || '暂无设备动作。'}`
   ].join('\n\n')
 }
+
+watch(selectedClassroom, async () => {
+  analysisCache.value = { key: '', payload: null, analysisTime: '' }
+  analysis.value = ''
+  aiResult.value = null
+  analysisTime.value = ''
+  await refreshRealtimeData()
+  await generate()
+})
 
 onMounted(async () => {
   await refreshRealtimeData()
