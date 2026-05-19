@@ -160,6 +160,10 @@ textarea {
   box-shadow: 12px 0 38px rgba(0, 0, 0, 0.28);
 }
 
+.sidebar.collapsed {
+  padding-inline: 12px;
+}
+
 .brand {
   display: flex;
   align-items: center;
@@ -168,6 +172,49 @@ textarea {
   color: #fff;
   font-size: 22px;
   font-weight: 800;
+}
+
+.collapse-toggle {
+  display: inline-grid;
+  width: 34px;
+  height: 34px;
+  margin-left: auto;
+  place-items: center;
+  border: 1px solid rgba(100, 205, 255, 0.35);
+  border-radius: 8px;
+  background: rgba(17, 84, 154, 0.38);
+  color: #dff7ff;
+  cursor: pointer;
+  transition: 0.18s ease;
+}
+
+.collapse-toggle:hover {
+  border-color: rgba(100, 225, 255, 0.7);
+  background: rgba(26, 142, 236, 0.58);
+  color: #ffffff;
+}
+
+.sidebar.collapsed .brand {
+  justify-content: center;
+  padding-inline: 0;
+}
+
+.sidebar.collapsed .brand strong {
+  display: none;
+}
+
+.sidebar.collapsed .brand-cube {
+  width: 34px;
+  height: 32px;
+}
+
+.sidebar.collapsed .brand-cube span {
+  transform: scale(0.72) rotate(45deg) skew(-12deg, -12deg);
+  transform-origin: center;
+}
+
+.sidebar.collapsed .collapse-toggle {
+  margin-left: 0;
 }
 
 .brand-cube {
@@ -224,6 +271,12 @@ textarea {
   transition: 0.18s ease;
 }
 
+.sidebar.collapsed .nav-item {
+  justify-content: center;
+  min-height: 52px;
+  padding: 0;
+}
+
 .nav-item .el-icon {
   font-size: 23px;
 }
@@ -268,6 +321,15 @@ textarea {
   font-size: 13px;
   font-style: normal;
   font-weight: 800;
+}
+
+.sidebar.collapsed .nav-badge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  min-width: 18px;
+  height: 18px;
+  font-size: 11px;
 }
 
 .campus-illustration {

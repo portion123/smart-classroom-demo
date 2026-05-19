@@ -1,5 +1,5 @@
 <template>
-  <aside class="sidebar">
+  <aside class="sidebar" :class="{ collapsed }">
     <div class="brand">
       <div class="brand-cube">
         <span></span>
@@ -7,6 +7,9 @@
         <span></span>
       </div>
       <strong>智慧教室</strong>
+      <button class="collapse-toggle" type="button" @click="toggleCollapse" :title="collapsed ? '展开导航' : '折叠导航'">
+        <el-icon><Menu /></el-icon>
+      </button>
     </div>
 
     <nav class="nav-list">
@@ -18,13 +21,13 @@
         @click="$emit('change-page', item.key)"
       >
         <el-icon><component :is="item.icon" /></el-icon>
-        <span>{{ item.label }}</span>
+        <span v-show="!collapsed">{{ item.label }}</span>
         <i v-if="item.key === 'alarm' && unhandledAlarmCount > 0" class="nav-badge" @click.stop="openAlarmPage">{{ badgeText }}</i>
-        <b></b>
+        <b v-show="!collapsed"></b>
       </button>
     </nav>
 
-    <div class="campus-illustration">
+    <div v-show="!collapsed" class="campus-illustration">
       <div class="iso-stage">
         <div class="screen"></div>
         <div v-for="i in 12" :key="i" class="desk" :style="deskStyle(i)"></div>
@@ -41,20 +44,25 @@ import {
   Bell,
   House,
   MagicStick,
+  Menu,
   Monitor,
   Operation,
   Setting,
   Timer
 } from '@element-plus/icons-vue'
 
-defineProps({
+const props = defineProps({
   activePage: {
     type: String,
     required: true
+  },
+  collapsed: {
+    type: Boolean,
+    default: false
   }
 })
 
-const emit = defineEmits(['change-page'])
+const emit = defineEmits(['change-page', 'toggle-collapse'])
 const ALERT_RECORDS_KEY = 'smart_classroom_alert_records'
 const unhandledAlarmCount = ref(3)
 
@@ -82,6 +90,11 @@ onUnmounted(() => {
 function openAlarmPage() {
   emit('change-page', 'alarm')
   ElMessage.success('已切换到异常预警')
+}
+
+function toggleCollapse() {
+  emit('toggle-collapse')
+  ElMessage.success(props.collapsed ? '导航已展开' : '导航已折叠')
 }
 
 function handleAlertUpdate(event) {

@@ -13,6 +13,15 @@
         <el-option label="小时" value="hour" />
         <el-option label="天" value="day" />
       </el-select>
+      <span class="filter-label">数据类型</span>
+      <el-select v-model="filters.metric" style="width: 160px">
+        <el-option label="全部指标" value="all" />
+        <el-option label="环境指标" value="env" />
+        <el-option label="使用/能耗" value="usage" />
+      </el-select>
+      <el-button class="primary-gradient" :icon="Refresh" @click="queryHistory">查询</el-button>
+      <el-button @click="resetHistoryFilters">重置</el-button>
+      <el-button class="success-gradient" :icon="Download" @click="exportHistoryData">导出</el-button>
     </section>
 
     <section class="history-layout">
@@ -22,13 +31,13 @@
         </section>
 
         <section class="history-chart-grid">
-          <ChartPanel title="温湿度历史曲线" :option="tempHumidityOption" height="190px" />
-          <ChartPanel title="CO2 历史曲线（ppm）" :option="co2Option" height="190px" />
-          <ChartPanel title="PM2.5 历史曲线（ug/m3）" :option="pm25Option" height="190px" />
-          <ChartPanel title="噪声历史曲线（dB）" :option="noiseOption" height="190px" />
-          <ChartPanel title="人数历史曲线（人）" :option="peopleOption" height="190px" />
-          <ChartPanel title="能耗历史曲线（kW）" :option="energyOption" height="190px" />
-          <ChartPanel class="wide-chart" title="教室使用强度热力图（小时分布）" :option="heatmapOption" height="190px" />
+          <ChartPanel v-if="showChart('env')" title="温湿度历史曲线" :option="tempHumidityOption" height="190px" />
+          <ChartPanel v-if="showChart('env')" title="CO2 历史曲线（ppm）" :option="co2Option" height="190px" />
+          <ChartPanel v-if="showChart('env')" title="PM2.5 历史曲线（ug/m3）" :option="pm25Option" height="190px" />
+          <ChartPanel v-if="showChart('env')" title="噪声历史曲线（dB）" :option="noiseOption" height="190px" />
+          <ChartPanel v-if="showChart('usage')" title="人数历史曲线（人）" :option="peopleOption" height="190px" />
+          <ChartPanel v-if="showChart('usage')" title="能耗历史曲线（kW）" :option="energyOption" height="190px" />
+          <ChartPanel v-if="showChart('usage')" class="wide-chart" title="教室使用强度热力图（小时分布）" :option="heatmapOption" height="190px" />
         </section>
 
         <section class="glass-card">
@@ -110,7 +119,7 @@
 <script setup>
 import { computed, inject, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Connection, Histogram, Monitor, Sunny, Timer, TrendCharts, UserFilled } from '@element-plus/icons-vue'
+import { Connection, Download, Histogram, Monitor, Refresh, Sunny, Timer, TrendCharts, UserFilled } from '@element-plus/icons-vue'
 import ChartPanel from '../components/ChartPanel.vue'
 import StatCard from '../components/StatCard.vue'
 import { getHistoryData, getLatestClassroom } from '../api/request'
@@ -123,7 +132,7 @@ const classroomOptions = [
 ]
 
 const appNavigation = inject('appNavigation', null)
-const filters = reactive({ classroom: appNavigation?.selectedClassroom?.value || 'A205', range: '', granularity: '15m' })
+const filters = reactive({ classroom: appNavigation?.selectedClassroom?.value || 'A205', range: '', granularity: '15m', metric: 'all' })
 const latest = ref({ classroomId: filters.classroom, classroomName: `${filters.classroom} 教室`, capacity: 0, area: 0, people_count: 0 })
 const history = ref([])
 let historyTimer = null
@@ -242,6 +251,38 @@ async function refreshHistory() {
   const [latestData, historyData] = await Promise.all([getLatestClassroom(id), getHistoryData(id)])
   latest.value = latestData
   history.value = Array.isArray(historyData) ? historyData : []
+}
+
+function showChart(type) {
+  return filters.metric === 'all' || filters.metric === type
+}
+
+async function queryHistory() {
+  await refreshHistory()
+  ElMessage.success(`已查询 ${roomTitle.value} 历史数据`)
+}
+
+async function resetHistoryFilters() {
+  filters.classroom = appNavigation?.selectedClassroom?.value || 'A205'
+  filters.range = ''
+  filters.granularity = '15m'
+  filters.metric = 'all'
+  await refreshHistory()
+  ElMessage.success('历史数据筛选条件已重置')
+}
+
+function exportHistoryData() {
+  const header = ['time', 'temperature', 'humidity', 'co2', 'light', 'pm25', 'noise', 'people_count', 'energy']
+  const rows = tableRows.value.map((row) => header.map((key) => row[key] ?? '').join(','))
+  const csv = [header.join(','), ...rows].join('\n')
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `${currentClassroomId.value}-history.csv`
+  link.click()
+  URL.revokeObjectURL(url)
+  ElMessage.success('历史数据 CSV 已导出')
 }
 
 watch(() => filters.classroom, (value) => {

@@ -30,8 +30,17 @@
             <el-option label="全部状态" value="all" />
             <el-option label="未处理" value="未处理" />
             <el-option label="已处理" value="已处理" />
+            <el-option label="已忽略" value="已忽略" />
+          </el-select>
+          <el-select v-model="filters.level" style="width: 160px">
+            <el-option label="全部级别" value="all" />
+            <el-option label="严重" value="danger" />
+            <el-option label="警告" value="warning" />
+            <el-option label="提示" value="info" />
           </el-select>
           <el-date-picker v-model="filters.date" type="date" placeholder="选择日期" style="width: 190px" />
+          <el-button :icon="Refresh" @click="queryAlarms">查询</el-button>
+          <el-button @click="resetAlarmFilters">重置</el-button>
           <el-button class="primary-gradient" :icon="Download" @click="exportAlarms">导出记录</el-button>
         </section>
 
@@ -60,10 +69,11 @@
                   </el-tag>
                 </template>
               </el-table-column>
-              <el-table-column label="操作" width="150">
+              <el-table-column label="操作" width="190">
                 <template #default="{ row }">
                   <el-button link type="primary" @click="showAlarmDetail(row)">详情</el-button>
                   <el-button v-if="isUnhandled(row.status)" link type="primary" @click="confirmProcessAlarm(row)">处理</el-button>
+                  <el-button v-if="isUnhandled(row.status)" link type="warning" @click="ignoreAlarm(row)">忽略</el-button>
                   <el-button v-else link type="primary" @click="showAlarmDetail(row)">查看</el-button>
                 </template>
               </el-table-column>
@@ -115,7 +125,7 @@
 <script setup>
 import { computed, inject, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Bell, Download, Monitor, Operation, Timer, WarningFilled } from '@element-plus/icons-vue'
+import { Bell, Download, Monitor, Operation, Refresh, Timer, WarningFilled } from '@element-plus/icons-vue'
 import ChartPanel from '../components/ChartPanel.vue'
 import { getAlarmList, getLatestClassroom } from '../api/request'
 
@@ -124,7 +134,7 @@ const selectedClassroom = computed(() => appNavigation?.selectedClassroom?.value
 const alarms = ref([])
 const latest = ref({ classroomId: selectedClassroom.value, classroomName: `${selectedClassroom.value} 教室`, temperature: '--', co2: '--', energy: '--' })
 const alarmTableRef = ref(null)
-const filters = reactive({ type: 'all', status: 'all', date: '' })
+const filters = reactive({ type: 'all', status: 'all', level: 'all', date: '' })
 let alarmTimer = null
 
 const currentClassroomId = computed(() => latest.value.classroomId || latest.value.classroom_id || selectedClassroom.value)
@@ -148,7 +158,8 @@ const filteredAlarms = computed(() =>
   alarms.value.filter((item) => {
     const typeMatched = filters.type === 'all' || String(item.type || '').includes(filters.type)
     const statusMatched = filters.status === 'all' || item.status === filters.status
-    return typeMatched && statusMatched
+    const levelMatched = filters.level === 'all' || levelTag(item.level) === filters.level
+    return typeMatched && statusMatched && levelMatched
   })
 )
 
@@ -190,7 +201,7 @@ const trendLabels = computed(() => alarms.value.slice().reverse().map((item) => 
 const trendValues = computed(() => trendLabels.value.map((_, index) => index + 1))
 
 function isUnhandled(status) {
-  return !/已处理|handled|resolved|done/i.test(String(status || '未处理'))
+  return !/已处理|已忽略|handled|ignored|resolved|done/i.test(String(status || '未处理'))
 }
 
 function levelTag(level) {
@@ -222,6 +233,26 @@ function processAlarm(row) {
   row.status = '已处理'
   notifyAlertCount()
   ElMessage.success('报警已标记为已处理')
+}
+
+function ignoreAlarm(row) {
+  row.status = '已忽略'
+  notifyAlertCount()
+  ElMessage.warning('该报警已忽略，已从未处理统计中移除')
+}
+
+async function queryAlarms() {
+  await loadAlarmData()
+  ElMessage.success('报警列表已按筛选条件刷新')
+}
+
+async function resetAlarmFilters() {
+  filters.type = 'all'
+  filters.status = 'all'
+  filters.level = 'all'
+  filters.date = ''
+  await loadAlarmData()
+  ElMessage.success('预警筛选条件已重置')
 }
 
 function showAlarmDetail(row) {
@@ -263,6 +294,7 @@ function quickView(page) {
   if (page === 'alarm') {
     filters.type = 'all'
     filters.status = 'all'
+    filters.level = 'all'
     alarmTableRef.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
     ElMessage.success('已定位到报警记录')
     return

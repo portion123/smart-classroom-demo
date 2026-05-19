@@ -20,8 +20,9 @@
         <el-option label="正常" value="normal" />
         <el-option label="预警" value="warning" />
       </el-select>
-      <el-button class="primary-gradient" :icon="Refresh" :loading="loading" @click="loadData">刷新</el-button>
-      <el-button class="success-gradient" :icon="Download">导出</el-button>
+      <el-button class="primary-gradient" :icon="Refresh" :loading="loading" @click="applyFilters">查询/刷新</el-button>
+      <el-button @click="resetFilters">重置</el-button>
+      <el-button class="success-gradient" :icon="Download" @click="exportRealtimeData">导出</el-button>
     </section>
 
     <section class="realtime-layout">
@@ -106,7 +107,7 @@
             </div>
           </div>
           <div class="mini-list">
-            <div v-for="item in abnormalPeriods" :key="item.id || item.time" class="mini-list-item">
+            <div v-for="item in abnormalPeriods" :key="item.id || item.time" class="mini-list-item clickable" @click="showAlarmDetail(item)">
               <el-icon><component :is="item.icon" /></el-icon>
               <div><strong>{{ item.time }}</strong><span>{{ item.type }} · {{ item.value }}</span></div>
             </div>
@@ -138,6 +139,7 @@
 
 <script setup>
 import { computed, inject, onMounted, reactive, ref, watch } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { CircleCheck, Connection, Download, Refresh, Sunny, Timer, Warning } from '@element-plus/icons-vue'
 import ChartPanel from '../components/ChartPanel.vue'
 import { getAlarmList, getHistoryData, getLatestClassroom } from '../api/request'
@@ -231,7 +233,11 @@ const tableRows = computed(() =>
     ...item,
     room: item.classroomName || item.classroomId || item.classroom_id || currentClassroomId.value,
     time: item.updatedAt || item.update_time || item.time
-  }))
+  })).filter((row) => {
+    if (filters.status === 'all') return true
+    const warning = Number(row.co2 || 0) > 1000 || Number(row.temperature || 0) > 30 || Number(row.pm25 || 0) > 55
+    return filters.status === 'warning' ? warning : !warning
+  })
 )
 
 const tempHumidityOption = computed(() => ({
@@ -321,6 +327,53 @@ async function loadData() {
   } finally {
     loading.value = false
   }
+}
+
+async function applyFilters() {
+  await loadData()
+  ElMessage.success(`已刷新 ${roomTitle.value} 实时数据`)
+}
+
+async function resetFilters() {
+  filters.building = 'all'
+  filters.range = ''
+  filters.status = 'all'
+  await loadData()
+  ElMessage.success('实时监测筛选条件已重置')
+}
+
+function exportRealtimeData() {
+  const payload = {
+    classroomId: currentClassroomId.value,
+    exportedAt: latest.value.updatedAt || new Date().toISOString(),
+    latest: latest.value,
+    history: tableRows.value,
+    alarms: alarms.value
+  }
+  downloadJson(`${currentClassroomId.value}-realtime-monitor.json`, payload)
+  ElMessage.success('实时监测数据已导出')
+}
+
+function showAlarmDetail(item) {
+  if (item.id === 'none') {
+    ElMessage.success('当前教室暂无异常')
+    return
+  }
+  ElMessageBox.alert(
+    `<p>教室：${roomTitle.value}</p><p>时间：${item.time || '-'}</p><p>类型：${item.type || '-'}</p><p>内容：${item.value || item.message || '-'}</p>`,
+    '异常详情',
+    { dangerouslyUseHTMLString: true, confirmButtonText: '知道了' }
+  )
+}
+
+function downloadJson(filename, payload) {
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  link.click()
+  URL.revokeObjectURL(url)
 }
 
 watch(selectedClassroom, (value) => {
@@ -499,5 +552,14 @@ onMounted(loadData)
 .compare-row small {
   color: var(--green);
   font-size: 14px;
+}
+
+.mini-list-item.clickable {
+  cursor: pointer;
+}
+
+.mini-list-item.clickable:hover {
+  border-color: rgba(64, 210, 255, 0.4);
+  background: rgba(19, 88, 158, 0.42);
 }
 </style>

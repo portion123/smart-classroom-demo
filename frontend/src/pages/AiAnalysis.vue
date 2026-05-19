@@ -2,7 +2,21 @@
   <div class="page ai-page">
     <div class="page-title-row">
       <h2>AI 智能分析</h2>
-      <el-tag effect="dark" type="primary">数据更新时间：{{ latest.updatedAt || latest.update_time || '-' }}</el-tag>
+      <div class="ai-toolbar">
+        <el-select v-model="localClassroom" style="width: 150px">
+          <el-option v-for="item in classroomOptions" :key="item.value" :label="item.label" :value="item.value" />
+        </el-select>
+        <el-select v-model="analysisType" style="width: 150px">
+          <el-option label="综合分析" value="comprehensive" />
+          <el-option label="节能分析" value="energy" />
+          <el-option label="环境分析" value="environment" />
+        </el-select>
+        <el-button :loading="loading" @click="refreshAnalysisData">刷新</el-button>
+        <el-button :loading="loading" @click="regenerateAnalysis">重新生成</el-button>
+        <el-button @click="copyAnalysis">复制</el-button>
+        <el-button @click="exportAnalysis">导出</el-button>
+        <el-tag effect="dark" type="primary">数据更新时间：{{ latest.updatedAt || latest.update_time || '-' }}</el-tag>
+      </div>
     </div>
 
     <section class="ai-top-grid">
@@ -135,6 +149,7 @@
       </p>
       <el-button class="primary-gradient action-button" :loading="optimizationLoading" :icon="MagicStick" @click="generateOptimization">一键优化方案</el-button>
       <el-button class="preview-button" :icon="View" @click="previewVisible = true">方案预览</el-button>
+      <el-button class="preview-button" @click="executeSuggestion">执行建议</el-button>
     </section>
 
     <el-dialog v-model="previewVisible" title="优化方案预览" width="520px" class="dark-dialog">
@@ -158,7 +173,15 @@ import ChartPanel from '../components/ChartPanel.vue'
 import { analyzeAi, getHistoryData, getLatestClassroom } from '../api/request'
 
 const appNavigation = inject('appNavigation', null)
-const selectedClassroom = computed(() => appNavigation?.selectedClassroom?.value || 'A205')
+const classroomOptions = [
+  { label: 'A205 教室', value: 'A205' },
+  { label: 'B101 教室', value: 'B101' },
+  { label: 'B102 教室', value: 'B102' },
+  { label: 'C301 教室', value: 'C301' }
+]
+const localClassroom = ref(appNavigation?.selectedClassroom?.value || 'A205')
+const selectedClassroom = computed(() => localClassroom.value)
+const analysisType = ref('comprehensive')
 
 const latest = ref({ classroomId: selectedClassroom.value, classroomName: `${selectedClassroom.value} 教室`, temperature: 26.1, humidity: 62, co2: 980, pm25: 28, noise: 45, people_count: 36, peopleCount: 36, energy: 8.8, update_time: '' })
 const history = ref([])
@@ -219,6 +242,7 @@ const mockAnalysisText = computed(() =>
 const currentClassroomPayload = computed(() => ({
   classroomId: currentClassroomId.value,
   classroom_id: currentClassroomId.value,
+  analysisType: analysisType.value,
   classroomData: {
     classroomId: currentClassroomId.value,
     classroom_id: currentClassroomId.value,
@@ -247,6 +271,7 @@ const currentClassroomPayload = computed(() => ({
 function buildAnalysisCacheKey() {
   return [
     currentClassroomId.value,
+    analysisType.value,
     latest.value.temperature,
     latest.value.humidity,
     latest.value.co2,
@@ -385,6 +410,62 @@ async function generate() {
   }
 }
 
+async function refreshAnalysisData() {
+  await refreshRealtimeData()
+  ElMessage.success(`${roomTitle.value} AI 分析数据已刷新`)
+}
+
+async function regenerateAnalysis() {
+  analysisCache.value = { key: '', payload: null, analysisTime: '' }
+  analysis.value = ''
+  aiResult.value = null
+  analysisTime.value = ''
+  await refreshRealtimeData()
+  await generate()
+}
+
+async function copyAnalysis() {
+  const text = [
+    analysisTitle.value,
+    `教室：${roomTitle.value}`,
+    `分析时间：${analysisDisplayTime.value}`,
+    analysis.value || optimization.value.summary
+  ].join('\n')
+  try {
+    await navigator.clipboard.writeText(text)
+    ElMessage.success('AI 分析内容已复制')
+  } catch (error) {
+    ElMessage.warning('当前浏览器不支持自动复制，请在弹窗中手动复制')
+    ElMessageBox.alert(text, 'AI 分析内容', { confirmButtonText: '知道了' })
+  }
+}
+
+function exportAnalysis() {
+  const payload = {
+    classroomId: currentClassroomId.value,
+    analysisType: analysisType.value,
+    analysisTime: analysisDisplayTime.value,
+    mode: aiMode.value,
+    cached: analysisIsCached.value,
+    analysis: analysis.value,
+    result: aiResult.value,
+    optimization: optimization.value
+  }
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `${currentClassroomId.value}-ai-analysis.json`
+  link.click()
+  URL.revokeObjectURL(url)
+  ElMessage.success('AI 分析 JSON 已导出')
+}
+
+function executeSuggestion() {
+  appNavigation?.navigateToPage?.('device', { classroom: currentClassroomId.value })
+  ElMessage.success(`已跳转到 ${roomTitle.value} 设备控制页，可执行 AI 建议`)
+}
+
 async function generateOptimization() {
   optimizationLoading.value = true
   try {
@@ -469,7 +550,19 @@ function formatStructuredAnalysis(result) {
   ].join('\n\n')
 }
 
-watch(selectedClassroom, async () => {
+watch(localClassroom, (value) => {
+  if (appNavigation?.selectedClassroom && appNavigation.selectedClassroom.value !== value) {
+    appNavigation.selectedClassroom.value = value
+  }
+})
+
+if (appNavigation?.selectedClassroom) {
+  watch(appNavigation.selectedClassroom, (value) => {
+    if (value && value !== localClassroom.value) localClassroom.value = value
+  })
+}
+
+watch([selectedClassroom, analysisType], async () => {
   analysisCache.value = { key: '', payload: null, analysisTime: '' }
   analysis.value = ''
   aiResult.value = null
@@ -494,6 +587,18 @@ onUnmounted(() => {
   display: grid;
   grid-template-columns: 300px minmax(0, 1fr) 430px;
   gap: 14px;
+}
+
+.page-title-row {
+  align-items: center;
+}
+
+.ai-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
 }
 
 .ai-score-card {
@@ -756,7 +861,7 @@ onUnmounted(() => {
 
 .ai-action-bar {
   display: grid;
-  grid-template-columns: 74px 1fr 210px 150px;
+  grid-template-columns: 74px 1fr 190px 130px 130px;
   align-items: center;
   gap: 18px;
   padding: 18px 22px;

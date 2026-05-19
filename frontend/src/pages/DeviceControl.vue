@@ -90,6 +90,11 @@
         </el-radio-group>
         <label>音量调节</label>
         <el-slider v-model="devices.multimedia.volume" @change="setMediaVolume" />
+        <div class="mode-row">
+          <el-button @click="openVideoSource">视频</el-button>
+          <el-button @click="muteMedia">静音</el-button>
+          <el-button type="primary" @click="setMediaAuto">自动</el-button>
+        </div>
       </article>
     </section>
 
@@ -250,7 +255,7 @@ const metrics = computed(() => ({
   noise: latest.value.noise ?? 48
 }))
 
-const todayEnergy = computed(() => Number(Number(latest.value.energy || 0).toFixed(1)))
+const todayEnergy = computed(() => calculateEnergyUsage())
 const weekEnergy = computed(() => Number((todayEnergy.value * 6.8).toFixed(1)))
 const todayEnergyNote = computed(() => (operationMode.value === 'energy' ? '预计节能 15%' : operationMode.value === 'leave' ? '节能待机中' : '动态模拟能耗'))
 const weekEnergyNote = computed(() => (operationMode.value === 'normal' ? '随教室负载变化' : '策略已生效'))
@@ -453,9 +458,46 @@ function setMediaSource(value) {
 
 function setMediaVolume(value) {
   markManualMode()
+  devices.multimedia.on = value > 0
   postDeviceControl('multimedia', value > 0, { volume: value, source: devices.multimedia.source })
   addLog('多媒体设备', `音量调节至 ${value}%`)
   ElMessage.success('多媒体音量已更新')
+}
+
+function openVideoSource() {
+  markManualMode()
+  Object.assign(devices.multimedia, { on: true, source: 'video', volume: Math.max(devices.multimedia.volume, 55) })
+  postDeviceControl('multimedia', true, { source: 'video', volume: devices.multimedia.volume })
+  addLog('多媒体设备', '开启视频信号源')
+  ElMessage.success('视频信号源已开启')
+}
+
+function muteMedia() {
+  markManualMode()
+  devices.multimedia.volume = 0
+  postDeviceControl('multimedia', devices.multimedia.on, { source: devices.multimedia.source, volume: 0 })
+  addLog('多媒体设备', '多媒体已静音')
+  ElMessage.success('多媒体已静音')
+}
+
+function setMediaAuto() {
+  markManualMode()
+  Object.assign(devices.multimedia, { on: true, source: 'pc', volume: 60 })
+  postDeviceControl('multimedia', true, { source: 'pc', volume: 60 })
+  addLog('多媒体设备', '切换为自动演示模式')
+  ElMessage.success('多媒体已切换为自动演示模式')
+}
+
+function calculateEnergyUsage() {
+  const peopleLoad = Number(latest.value.peopleCount ?? latest.value.people_count ?? 0) * 0.018
+  const lightLoad = devices.light.on ? devices.light.brightness * 0.018 : 0
+  const acLoad = devices.airConditioner.on ? 2.4 + Math.max(0, 26 - devices.airConditioner.temperature) * 0.18 : 0.2
+  const freshAirMap = { low: 0.5, mid: 0.9, high: 1.3, auto: 0.75 }
+  const freshAirLoad = devices.freshAir.on ? freshAirMap[devices.freshAir.speed] : 0
+  const curtainLoad = devices.curtain.opening > 0 ? 0.12 : 0
+  const mediaLoad = devices.multimedia.on ? 0.55 + devices.multimedia.volume * 0.006 : 0
+  const modeFactor = operationMode.value === 'leave' ? 0.72 : operationMode.value === 'energy' ? 0.86 : 1
+  return Number(((2.6 + peopleLoad + lightLoad + acLoad + freshAirLoad + curtainLoad + mediaLoad) * modeFactor).toFixed(1))
 }
 
 function toggleStrategy(item, value) {
