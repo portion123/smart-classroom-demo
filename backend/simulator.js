@@ -1,4 +1,16 @@
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+
 const DEFAULT_CLASSROOM_ID = 'A205'
+const HISTORY_INTERVAL_MS = Number(process.env.HISTORY_INTERVAL_MS || 15 * 60 * 1000)
+const HISTORY_RETENTION_DAYS = Number(process.env.HISTORY_RETENTION_DAYS || 30)
+const HISTORY_SEED_DAYS = Number(process.env.HISTORY_SEED_DAYS || 14)
+const HISTORY_MAX_POINTS = Math.ceil((HISTORY_RETENTION_DAYS * 24 * 60 * 60 * 1000) / HISTORY_INTERVAL_MS)
+const DEFAULT_HISTORY_LIMIT = Math.min(HISTORY_MAX_POINTS, 7 * 24 * 4)
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+const historyDataDir = process.env.HISTORY_DATA_DIR || path.join(__dirname, 'data')
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value))
 const round = (value, digits = 1) => Number(value.toFixed(digits))
@@ -129,6 +141,63 @@ const normalizeClassroomId = (classroomId = DEFAULT_CLASSROOM_ID) => {
 
 const getProfile = (classroomId) => classroomProfiles[normalizeClassroomId(classroomId)]
 
+const historyFilePath = (classroomId) => path.join(historyDataDir, `${normalizeClassroomId(classroomId)}-history.json`)
+
+const timestampOf = (item) => {
+  const value = item?.updatedAt || item?.update_time || item?.generatedAt || item?.timestamp || item?.time
+  const time = new Date(value).getTime()
+  return Number.isFinite(time) ? time : 0
+}
+
+const trimHistory = (runtime) => {
+  if (runtime.historyData.length > HISTORY_MAX_POINTS) {
+    runtime.historyData.splice(0, runtime.historyData.length - HISTORY_MAX_POINTS)
+  }
+}
+
+const saveHistoryData = (runtime) => {
+  try {
+    fs.mkdirSync(historyDataDir, { recursive: true })
+    fs.writeFileSync(historyFilePath(runtime.profile.classroomId), JSON.stringify(runtime.historyData, null, 2))
+  } catch (error) {
+    console.warn(`Failed to persist history for ${runtime.profile.classroomId}: ${error.message}`)
+  }
+}
+
+const loadHistoryData = (runtime) => {
+  try {
+    const filePath = historyFilePath(runtime.profile.classroomId)
+    if (!fs.existsSync(filePath)) return []
+    const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8'))
+    if (!Array.isArray(parsed)) return []
+    return parsed
+      .filter((item) => timestampOf(item))
+      .sort((a, b) => timestampOf(a) - timestampOf(b))
+      .slice(-HISTORY_MAX_POINTS)
+  } catch (error) {
+    console.warn(`Failed to load history for ${runtime.profile.classroomId}: ${error.message}`)
+    return []
+  }
+}
+
+const applyHistoryPointToState = (runtime, point) => {
+  if (!point) return
+  Object.assign(runtime.state, {
+    temperature: round(Number(point.temperature) || runtime.state.temperature),
+    humidity: round(Number(point.humidity) || runtime.state.humidity),
+    co2: Math.round(Number(point.co2) || runtime.state.co2),
+    pm25: round(Number(point.pm25) || runtime.state.pm25),
+    noise: round(Number(point.noise) || runtime.state.noise),
+    light: Math.round(Number(point.light) || runtime.state.light),
+    peopleCount: Math.round(Number(point.peopleCount ?? point.people_count) || runtime.state.peopleCount),
+    energy: round(Number(point.energy) || runtime.state.energy, 2),
+    currentTime: point.currentTime || point.updatedAt || point.update_time || point.generatedAt || point.time,
+    updatedAt: point.updatedAt || point.update_time || point.generatedAt || point.time,
+    generatedAt: point.generatedAt || point.updatedAt || point.update_time || point.time,
+    update_time: point.update_time || point.updatedAt || point.generatedAt || point.time
+  })
+}
+
 const computeDeviceEnergy = (devices) => Object.values(devices).reduce((sum, device) => {
   if (!device.status || device.online === false) return sum
   return sum + Number(device.power || 0)
@@ -207,13 +276,12 @@ const createHistoryPoint = (runtime, timestampMs) => {
   }
 }
 
-const pushHistoryPoint = (runtime, timestampMs) => {
+const pushHistoryPoint = (runtime, timestampMs, persist = true) => {
   const point = createHistoryPoint(runtime, timestampMs)
   runtime.historyData.push(point)
-  if (runtime.historyData.length > 288) {
-    runtime.historyData.splice(0, runtime.historyData.length - 288)
-  }
+  trimHistory(runtime)
   runtime.lastHistoryAt = timestampMs
+  if (persist) saveHistoryData(runtime)
 }
 
 const softMove = (current, target, factor, noise = 0, min = -Infinity, max = Infinity) => {
@@ -287,13 +355,25 @@ const getRuntime = (classroomId = DEFAULT_CLASSROOM_ID) => {
       lastHistoryAt: 0
     }
 
-    const start = Date.now() - 2 * 60 * 60 * 1000
-    for (let i = 0; i < 48; i += 1) {
-      const timestamp = start + i * 150000
-      simulateStep(runtime, timestamp)
-      pushHistoryPoint(runtime, timestamp)
+    const loadedHistory = loadHistoryData(runtime)
+    if (loadedHistory.length) {
+      runtime.historyData = loadedHistory
+      const lastPoint = loadedHistory[loadedHistory.length - 1]
+      const lastTimestamp = timestampOf(lastPoint) || Date.now()
+      applyHistoryPointToState(runtime, lastPoint)
+      runtime.lastHistoryAt = lastTimestamp
+      runtime.lastTickAt = lastTimestamp
+    } else {
+      const now = Date.now()
+      const start = now - Math.min(HISTORY_SEED_DAYS, HISTORY_RETENTION_DAYS) * 24 * 60 * 60 * 1000
+      for (let timestamp = start; timestamp <= now; timestamp += HISTORY_INTERVAL_MS) {
+        simulateStep(runtime, timestamp)
+        pushHistoryPoint(runtime, timestamp, false)
+      }
+      runtime.lastTickAt = now
+      saveHistoryData(runtime)
     }
-    runtime.lastTickAt = Date.now()
+
     runtimeMap.set(normalizedId, runtime)
   }
 
@@ -309,18 +389,27 @@ const advanceSimulation = (runtime) => {
   }
 
   const step = 15000
+  let historyChanged = false
   while (elapsed > 0) {
     const tickAt = runtime.lastTickAt + Math.min(step, elapsed)
     simulateStep(runtime, tickAt)
     runtime.lastTickAt = tickAt
+    if (tickAt - runtime.lastHistoryAt >= HISTORY_INTERVAL_MS) {
+      pushHistoryPoint(runtime, tickAt, false)
+      historyChanged = true
+    }
     elapsed = now - runtime.lastTickAt
   }
 
-  if (now - runtime.lastHistoryAt >= 150000) {
-    pushHistoryPoint(runtime, now)
+  if (!runtime.historyData.length) {
+    pushHistoryPoint(runtime, now, false)
+    historyChanged = true
   } else if (runtime.historyData.length) {
     runtime.historyData[runtime.historyData.length - 1] = createHistoryPoint(runtime, now)
+    historyChanged = true
   }
+
+  if (historyChanged) saveHistoryData(runtime)
 }
 
 const buildCurrentAlarms = (runtime) => {
@@ -470,10 +559,10 @@ export const getLatestClassroom = (classroomId = DEFAULT_CLASSROOM_ID) => {
   return serializeState(runtime)
 }
 
-export const getHistoryData = (limit = 72, classroomId = DEFAULT_CLASSROOM_ID) => {
+export const getHistoryData = (limit = DEFAULT_HISTORY_LIMIT, classroomId = DEFAULT_CLASSROOM_ID) => {
   const runtime = getRuntime(classroomId)
   advanceSimulation(runtime)
-  const max = Number(limit) || 72
+  const max = Math.min(Number(limit) || DEFAULT_HISTORY_LIMIT, HISTORY_MAX_POINTS)
   return runtime.historyData.slice(-max)
 }
 

@@ -318,7 +318,7 @@ async function loadData() {
     const id = selectedClassroom.value
     const [latestData, historyData, alarmData] = await Promise.all([
       getLatestClassroom(id),
-      getHistoryData(id),
+      getHistoryData(id, 96),
       getAlarmList(id)
     ])
     latest.value = latestData

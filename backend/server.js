@@ -169,7 +169,8 @@ function isAllowedOrigin(origin) {
     const url = new URL(origin)
     const isLocal = ['localhost', '127.0.0.1', '::1'].includes(url.hostname)
     const isZeabur = url.hostname === 'zeabur.app' || url.hostname.endsWith('.zeabur.app')
-    return isLocal || isZeabur
+    const isSpaceportion = url.hostname === 'spaceportion.com' || url.hostname.endsWith('.spaceportion.com')
+    return isLocal || isZeabur || isSpaceportion
   } catch (error) {
     return false
   }

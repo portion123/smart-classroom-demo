@@ -319,7 +319,7 @@ function normalizeHistoryPoint(item, fallbackTime) {
   const peopleCount = normalized.peopleCount ?? normalized.people_count ?? 0
   return {
     ...normalized,
-    time: String(normalized.time || normalized.updatedAt.split(' ')[1]).slice(0, 8),
+    time: normalized.updatedAt,
     date: normalized.date || normalized.updatedAt.slice(5, 10),
     peopleCount,
     people_count: peopleCount
@@ -393,9 +393,9 @@ export function getLatestClassroom(classroomId = DEFAULT_CLASSROOM_ID) {
   return apiGet(`/api/classroom/latest?${classroomQuery(id)}`, () => latestMock(id)).then((data) => normalizeLatestPayload(data))
 }
 
-export function getHistoryData(classroomId = DEFAULT_CLASSROOM_ID, limit = 72) {
+export function getHistoryData(classroomId = DEFAULT_CLASSROOM_ID, limit = 7 * 24 * 4) {
   const id = normalizeClassroomId(classroomId)
-  return apiGet(`/api/classroom/history?${classroomQuery(id)}&limit=${encodeURIComponent(limit)}`, () => historyMock(48, id)).then((data) => normalizeHistoryPayload(data))
+  return apiGet(`/api/classroom/history?${classroomQuery(id)}&limit=${encodeURIComponent(limit)}`, () => historyMock(limit, id)).then((data) => normalizeHistoryPayload(data))
 }
 
 export function getAlarmList(classroomId = DEFAULT_CLASSROOM_ID) {

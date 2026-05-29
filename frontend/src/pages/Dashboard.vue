@@ -241,7 +241,7 @@ async function loadLatest() {
 
 async function loadDashboard() {
   const id = selectedClassroom.value
-  const [latestData, historyData, alarmData] = await Promise.all([getLatestClassroom(id), getHistoryData(id), getAlarmList(id)])
+  const [latestData, historyData, alarmData] = await Promise.all([getLatestClassroom(id), getHistoryData(id, 96), getAlarmList(id)])
   latest.value = latestData
   history.value = historyData
   alarms.value = alarmData.map(normalizeAlarm)

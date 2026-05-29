@@ -282,7 +282,7 @@ function buildAnalysisCacheKey() {
 
 async function refreshRealtimeData() {
   const id = selectedClassroom.value
-  const [latestData, historyData] = await Promise.all([getLatestClassroom(id), getHistoryData(id)])
+  const [latestData, historyData] = await Promise.all([getLatestClassroom(id), getHistoryData(id, 96)])
   latest.value = latestData
   history.value = historyData
 }

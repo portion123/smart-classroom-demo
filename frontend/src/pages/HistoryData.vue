@@ -136,6 +136,7 @@ const filters = reactive({ classroom: appNavigation?.selectedClassroom?.value ||
 const latest = ref({ classroomId: filters.classroom, classroomName: `${filters.classroom} 教室`, capacity: 0, area: 0, people_count: 0 })
 const history = ref([])
 let historyTimer = null
+const HISTORY_PAGE_LIMIT = 7 * 24 * 4
 
 const currentClassroomId = computed(() => latest.value.classroomId || latest.value.classroom_id || filters.classroom)
 const roomTitle = computed(() => latest.value.classroomName || latest.value.name || `${currentClassroomId.value} 教室`)
@@ -248,7 +249,7 @@ function openDeviceDetail() {
 
 async function refreshHistory() {
   const id = filters.classroom
-  const [latestData, historyData] = await Promise.all([getLatestClassroom(id), getHistoryData(id)])
+  const [latestData, historyData] = await Promise.all([getLatestClassroom(id), getHistoryData(id, HISTORY_PAGE_LIMIT)])
   latest.value = latestData
   history.value = Array.isArray(historyData) ? historyData : []
 }
