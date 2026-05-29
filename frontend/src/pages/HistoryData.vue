@@ -136,7 +136,7 @@ const filters = reactive({ classroom: appNavigation?.selectedClassroom?.value ||
 const latest = ref({ classroomId: filters.classroom, classroomName: `${filters.classroom} 教室`, capacity: 0, area: 0, people_count: 0 })
 const history = ref([])
 let historyTimer = null
-const HISTORY_PAGE_LIMIT = 7 * 24 * 4
+const HISTORY_PAGE_LIMIT = 30 * 24 * 4
 
 const currentClassroomId = computed(() => latest.value.classroomId || latest.value.classroom_id || filters.classroom)
 const roomTitle = computed(() => latest.value.classroomName || latest.value.name || `${currentClassroomId.value} 教室`)

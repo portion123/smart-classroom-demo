@@ -393,7 +393,7 @@ export function getLatestClassroom(classroomId = DEFAULT_CLASSROOM_ID) {
   return apiGet(`/api/classroom/latest?${classroomQuery(id)}`, () => latestMock(id)).then((data) => normalizeLatestPayload(data))
 }
 
-export function getHistoryData(classroomId = DEFAULT_CLASSROOM_ID, limit = 7 * 24 * 4) {
+export function getHistoryData(classroomId = DEFAULT_CLASSROOM_ID, limit = 30 * 24 * 4) {
   const id = normalizeClassroomId(classroomId)
   return apiGet(`/api/classroom/history?${classroomQuery(id)}&limit=${encodeURIComponent(limit)}`, () => historyMock(limit, id)).then((data) => normalizeHistoryPayload(data))
 }

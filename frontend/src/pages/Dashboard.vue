@@ -148,6 +148,7 @@ const aiLoading = ref(false)
 const analysisTime = ref('')
 let latestTimer = null
 let historyTimer = null
+const DASHBOARD_HISTORY_LIMIT = 30 * 24 * 4
 
 const rules = {
   temperature: [28, 30],
@@ -210,10 +211,24 @@ function makeLineOption(name, xData, data, color, unit) {
     color: [color],
     tooltip: { trigger: 'axis', backgroundColor: 'rgba(4, 18, 42, 0.92)', borderColor: '#1a9cff', textStyle: { color: '#eaf6ff' } },
     grid: { left: 42, right: 18, top: 34, bottom: 30 },
-    xAxis: { type: 'category', data: xData, boundaryGap: false, axisLine: { lineStyle: { color: 'rgba(152, 204, 255, .28)' } }, axisLabel: { color: '#9fc2df', hideOverlap: true } },
+    xAxis: {
+      type: 'category',
+      data: xData,
+      boundaryGap: false,
+      axisLine: { lineStyle: { color: 'rgba(152, 204, 255, .28)' } },
+      axisLabel: { color: '#9fc2df', hideOverlap: true, formatter: formatAxisLabel }
+    },
     yAxis: { type: 'value', name: unit, splitLine: { lineStyle: { color: 'rgba(120, 180, 255, .12)', type: 'dashed' } }, axisLabel: { color: '#9fc2df' }, nameTextStyle: { color: '#9fc2df' } },
-    series: [{ name, type: 'line', smooth: true, symbolSize: 7, data, lineStyle: { width: 3 }, areaStyle: { color: `${color}22` } }]
+    series: [{ name, type: 'line', smooth: true, showSymbol: false, symbolSize: 7, data, lineStyle: { width: 3 }, areaStyle: { color: `${color}22` } }]
   }
+}
+
+function formatAxisLabel(value) {
+  const date = new Date(String(value).replace(' ', 'T'))
+  if (Number.isNaN(date.getTime())) return String(value).slice(0, 10)
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${month}-${day}`
 }
 
 function levelText(level) {
@@ -241,7 +256,7 @@ async function loadLatest() {
 
 async function loadDashboard() {
   const id = selectedClassroom.value
-  const [latestData, historyData, alarmData] = await Promise.all([getLatestClassroom(id), getHistoryData(id, 96), getAlarmList(id)])
+  const [latestData, historyData, alarmData] = await Promise.all([getLatestClassroom(id), getHistoryData(id, DASHBOARD_HISTORY_LIMIT), getAlarmList(id)])
   latest.value = latestData
   history.value = historyData
   alarms.value = alarmData.map(normalizeAlarm)

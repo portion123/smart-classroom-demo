@@ -5,9 +5,9 @@ import { fileURLToPath } from 'node:url'
 const DEFAULT_CLASSROOM_ID = 'A205'
 const HISTORY_INTERVAL_MS = Number(process.env.HISTORY_INTERVAL_MS || 15 * 60 * 1000)
 const HISTORY_RETENTION_DAYS = Number(process.env.HISTORY_RETENTION_DAYS || 30)
-const HISTORY_SEED_DAYS = Number(process.env.HISTORY_SEED_DAYS || 14)
+const HISTORY_SEED_DAYS = Number(process.env.HISTORY_SEED_DAYS || 30)
 const HISTORY_MAX_POINTS = Math.ceil((HISTORY_RETENTION_DAYS * 24 * 60 * 60 * 1000) / HISTORY_INTERVAL_MS)
-const DEFAULT_HISTORY_LIMIT = Math.min(HISTORY_MAX_POINTS, 7 * 24 * 4)
+const DEFAULT_HISTORY_LIMIT = HISTORY_MAX_POINTS
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 const historyDataDir = process.env.HISTORY_DATA_DIR || path.join(__dirname, 'data')
@@ -198,6 +198,18 @@ const applyHistoryPointToState = (runtime, point) => {
   })
 }
 
+const seedHistoryRange = (runtime, start, end) => {
+  const originalHistory = runtime.historyData
+  runtime.historyData = []
+  for (let timestamp = start; timestamp <= end; timestamp += HISTORY_INTERVAL_MS) {
+    simulateStep(runtime, timestamp)
+    pushHistoryPoint(runtime, timestamp, false)
+  }
+  const seeded = runtime.historyData
+  runtime.historyData = originalHistory
+  return seeded
+}
+
 const computeDeviceEnergy = (devices) => Object.values(devices).reduce((sum, device) => {
   if (!device.status || device.online === false) return sum
   return sum + Number(device.power || 0)
@@ -357,12 +369,19 @@ const getRuntime = (classroomId = DEFAULT_CLASSROOM_ID) => {
 
     const loadedHistory = loadHistoryData(runtime)
     if (loadedHistory.length) {
-      runtime.historyData = loadedHistory
+      const now = Date.now()
+      const desiredStart = now - Math.min(HISTORY_SEED_DAYS, HISTORY_RETENTION_DAYS) * 24 * 60 * 60 * 1000
+      const firstLoadedAt = timestampOf(loadedHistory[0])
+      const backfilledHistory = firstLoadedAt > desiredStart + HISTORY_INTERVAL_MS
+        ? seedHistoryRange(runtime, desiredStart, firstLoadedAt - HISTORY_INTERVAL_MS)
+        : []
+      runtime.historyData = [...backfilledHistory, ...loadedHistory].slice(-HISTORY_MAX_POINTS)
       const lastPoint = loadedHistory[loadedHistory.length - 1]
       const lastTimestamp = timestampOf(lastPoint) || Date.now()
       applyHistoryPointToState(runtime, lastPoint)
       runtime.lastHistoryAt = lastTimestamp
       runtime.lastTickAt = lastTimestamp
+      if (backfilledHistory.length) saveHistoryData(runtime)
     } else {
       const now = Date.now()
       const start = now - Math.min(HISTORY_SEED_DAYS, HISTORY_RETENTION_DAYS) * 24 * 60 * 60 * 1000
